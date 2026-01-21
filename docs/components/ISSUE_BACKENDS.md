@@ -1,25 +1,25 @@
 # Issue Backends
 
-Fugue supports multiple issue backends per project:
-- `tk` — local markdown files under `.fugue/tickets/` in the repo clone
+Murmur supports multiple issue backends per project:
+- `tk` — local markdown files under `.murmur/tickets/` in the repo clone
 - GitHub Issues (GraphQL)
 - Linear Issues (GraphQL)
 
-The orchestrator always operates on the unified `Issue` model defined in `fugue-core`.
+The orchestrator always operates on the unified `Issue` model defined in `murmur-core`.
 
 Code pointers:
-- Domain model + pure helpers: `crates/fugue-core/src/issue.rs`
-- Backend selection: `crates/fugue/src/daemon/issue_backend.rs`
-- `tk` backend implementation: `crates/fugue/src/issues.rs`
-- GitHub: `crates/fugue/src/github.rs`
-- Linear: `crates/fugue/src/linear.rs`
-- `issue plan` implementation: `crates/fugue/src/daemon/rpc/issue.rs`
+- Domain model + pure helpers: `crates/murmur-core/src/issue.rs`
+- Backend selection: `crates/murmur/src/daemon/issue_backend.rs`
+- `tk` backend implementation: `crates/murmur/src/issues.rs`
+- GitHub: `crates/murmur/src/github.rs`
+- Linear: `crates/murmur/src/linear.rs`
+- `issue plan` implementation: `crates/murmur/src/daemon/rpc/issue.rs`
 
 ---
 
 ## Shared Issue Model
 
-The canonical model is `fugue_core::issue::Issue`:
+The canonical model is `murmur_core::issue::Issue`:
 - `id`, `title`, `description`
 - `status` (`open|blocked|closed`)
 - `priority`, `type`
@@ -37,7 +37,7 @@ Filtering for `issue list` is handled by `ListFilter` in the core crate.
 
 Tickets are stored in the project repo clone:
 
-`projects/<project>/repo/.fugue/tickets/<id>.md`
+`projects/<project>/repo/.murmur/tickets/<id>.md`
 
 Format details: `docs/TICKETS.md`.
 
@@ -47,12 +47,12 @@ Format details: `docs/TICKETS.md`.
 - lists open issues
 - filters out issues with open dependencies (dependency ids still open)
 
-Implementation uses `fugue_core::issue::compute_ready_issues`.
+Implementation uses `murmur_core::issue::compute_ready_issues`.
 
 ### Commit behavior
 
 `issue commit` exists for `tk` only:
-- stages `.fugue/tickets/`
+- stages `.murmur/tickets/`
 - commits with provided message
 - pushes `HEAD` to `origin`
 - uses a `.lock` file in the tickets dir to serialize ticket commits
@@ -63,7 +63,7 @@ Implementation uses `fugue_core::issue::compute_ready_issues`.
 
 ### Requirements
 
-- Project repo `origin` must be a GitHub remote so Fugue can detect `owner/repo`.
+- Project repo `origin` must be a GitHub remote so Murmur can detect `owner/repo`.
 - Auth via:
   - env: `GITHUB_TOKEN` or `GH_TOKEN`
   - config: `[providers.github].token` / `api-key`
@@ -101,12 +101,12 @@ Supported by:
 - GitHub and Linear (updates the issue body via API)
 
 The upsert logic is pure and lives in:
-- `crates/fugue-core/src/issue.rs` (`upsert_plan_section`)
+- `crates/murmur-core/src/issue.rs` (`upsert_plan_section`)
 
 CLI usage:
 
-`fugue issue plan <project> <id> --file plan.md`
+`mm issue plan <project> <id> --file plan.md`
 
 or
 
-`fugue issue plan <project> <id> --body "..."`.
+`mm issue plan <project> <id> --body "..."`.

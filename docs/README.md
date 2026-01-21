@@ -1,6 +1,6 @@
 # Documentation
 
-This folder is the canonical documentation for Fugue (local-only agent orchestration supervisor).
+This folder is the canonical documentation for Murmur (local-only agent orchestration supervisor).
 
 ## Start Here
 
@@ -13,7 +13,7 @@ This folder is the canonical documentation for Fugue (local-only agent orchestra
 
 ## Domain Docs
 
-- `docs/TICKETS.md` — `.fugue/tickets/` format (tk backend)
+- `docs/TICKETS.md` — `.murmur/tickets/` format (tk backend)
 - `docs/SPRINTS.md` — implementation plan / parity tracking
 
 ## Component Docs

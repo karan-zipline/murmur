@@ -1,10 +1,10 @@
-# `tk` Tickets (`.fugue/tickets/`)
+# `tk` Tickets (`.murmur/tickets/`)
 
-Fugue’s `tk` backend stores issues as Markdown files in the project repository under:
+Murmur’s `tk` backend stores issues as Markdown files in the project repository under:
 
-`./.fugue/tickets/<issue-id>.md`
+`./.murmur/tickets/<issue-id>.md`
 
-These files are intended to be committed and pushed via `fugue issue commit`.
+These files are intended to be committed and pushed via `mm issue commit`.
 
 ## File Format
 
@@ -23,10 +23,10 @@ Supported keys:
 - `type` (string, optional): Freeform issue type (examples: `task`, `feature`, `bug`).
 - `priority` (int, optional): Defaults to `0`.
 - `labels` (list[string], optional)
-- `deps` (list[string], optional): Dependencies by issue id. While an issue depends on any *open* issue id, it won’t appear in `fugue issue ready`.
+- `deps` (list[string], optional): Dependencies by issue id. While an issue depends on any *open* issue id, it won’t appear in `mm issue ready`.
 - `links` (list[string], optional): Related URLs.
 
-Unknown keys are ignored by Fugue (but will not be preserved if Fugue rewrites the file).
+Unknown keys are ignored by Murmur (but will not be preserved if Murmur rewrites the file).
 
 ### Body
 
@@ -36,7 +36,7 @@ Body conventions:
 - The remainder is the description (freeform Markdown).
 - Comments are appended into the description under a `## Comments` section.
 
-`fugue issue comment` writes comments as:
+`mm issue comment` writes comments as:
 
 `**YYYY-MM-DD HH:MM**: <text>` (UTC)
 
@@ -69,20 +69,20 @@ Implement list/get/ready/create/update/close/comment/commit for tk issues.
 
 Create an issue:
 
-`fugue issue create "Title" --project <project> --description "..."`
+`mm issue create "Title" --project <project> --description "..."`
 
 List and view:
 
-- `fugue issue list --project <project>`
-- `fugue issue show <id> --project <project>`
-- `fugue issue ready --project <project>`
+- `mm issue list --project <project>`
+- `mm issue show <id> --project <project>`
+- `mm issue ready --project <project>`
 
 Update / close / comment:
 
-- `fugue issue update <id> --project <project> --title "..." --status open|closed|blocked`
-- `fugue issue close <id> --project <project>`
-- `fugue issue comment <id> --project <project> --body "message"`
+- `mm issue update <id> --project <project> --title "..." --status open|closed|blocked`
+- `mm issue close <id> --project <project>`
+- `mm issue comment <id> --project <project> --body "message"`
 
-Commit and push `.fugue/tickets/` (tk only):
+Commit and push `.murmur/tickets/` (tk only):
 
-`fugue issue commit --project <project>`
+`mm issue commit --project <project>`

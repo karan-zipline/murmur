@@ -1,13 +1,13 @@
 # Daemon Internals
 
-This doc describes the Fugue daemon (the long-running supervisor process).
+This doc describes the Murmur daemon (the long-running supervisor process).
 
 Code pointers:
-- Daemon entry: `crates/fugue/src/daemon/mod.rs`
-- Socket server: `crates/fugue/src/daemon/server.rs`
-- Shared state model: `crates/fugue/src/daemon/state.rs`
-- RPC handlers: `crates/fugue/src/daemon/rpc/`
-- Webhooks: `crates/fugue/src/daemon/webhook.rs`
+- Daemon entry: `crates/murmur/src/daemon/mod.rs`
+- Socket server: `crates/murmur/src/daemon/server.rs`
+- Shared state model: `crates/murmur/src/daemon/state.rs`
+- RPC handlers: `crates/murmur/src/daemon/rpc/`
+- Webhooks: `crates/murmur/src/daemon/webhook.rs`
 
 See also:
 - `docs/components/IPC.md`
@@ -29,19 +29,19 @@ The daemon is the control plane. It owns:
 - Optional webhook server (tick requests).
 
 The daemon does *not* implement business rules as side-effecting code:
-- Pure logic lives in `fugue-core` (e.g. orchestration tick decisions, parsing, plan upserts).
+- Pure logic lives in `murmur-core` (e.g. orchestration tick decisions, parsing, plan upserts).
 - The daemon is the imperative shell: git, filesystem, sockets, subprocesses, HTTP.
 
 ---
 
 ## Startup Sequence (High-Level)
 
-1. Resolve `FuguePaths` (honors `FUGUE_DIR`).
-2. Load config: `crates/fugue/src/config_store.rs`.
+1. Resolve `MurmurPaths` (honors `MURMUR_DIR`).
+2. Load config: `crates/murmur/src/config_store.rs`.
 3. Initialize `SharedState`:
    - `config`, `agents`, `claims`, `orchestrators`, `pending_permissions`, `pending_questions`, etc.
 4. Load persisted runtime metadata (best-effort) to resume agents/plans/managers.
-5. Start the Unix socket server (`fugue.sock`). By default, the socket is placed in `XDG_RUNTIME_DIR` when available; when `FUGUE_DIR` is set, it is placed under `$FUGUE_DIR/fugue.sock`.
+5. Start the Unix socket server (`murmur.sock`). By default, the socket is placed in `XDG_RUNTIME_DIR` when available; when `MURMUR_DIR` is set, it is placed under `$MURMUR_DIR/murmur.sock`.
 6. Start webhook server if enabled.
 7. Autostart orchestrators for projects with `autostart = true`.
 
@@ -66,10 +66,10 @@ Important invariants:
 
 ## Shared State
 
-`SharedState` (`crates/fugue/src/daemon/state.rs`) is the daemon’s in-memory “database”.
+`SharedState` (`crates/murmur/src/daemon/state.rs`) is the daemon’s in-memory “database”.
 
 Key fields:
-- `paths: FuguePaths` — resolved filesystem layout.
+- `paths: MurmurPaths` — resolved filesystem layout.
 - `config: Mutex<ConfigFile>` — loaded global config (`[[projects]]` etc).
 - `agents: Mutex<AgentsState>` — live agent runtimes.
 - `claims: Mutex<ClaimRegistry>` — issue claims (prevents duplicate work).

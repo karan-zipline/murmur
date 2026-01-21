@@ -1,8 +1,8 @@
-# Fugue (Rust) — Architecture
+# Murmur (Rust) — Architecture
 
-Fugue is a local-only coding-agent supervisor. It manages multiple Claude Code or Codex CLI instances across multiple projects, isolates each agent in its own git worktree, assigns work from pluggable issue backends, and provides a CLI for monitoring + approvals.
+Murmur is a local-only coding-agent supervisor. It manages multiple Claude Code or Codex CLI instances across multiple projects, isolates each agent in its own git worktree, assigns work from pluggable issue backends, and provides a CLI for monitoring + approvals.
 
-This document is the architecture contract for Fugue. It describes the intended components, boundaries, protocols, on-disk layout, and runtime flows. Improvements and redesigns are explicitly out of scope for the initial implementation.
+This document is the architecture contract for Murmur. It describes the intended components, boundaries, protocols, on-disk layout, and runtime flows. Improvements and redesigns are explicitly out of scope for the initial implementation.
 
 If you’re looking for user docs rather than internals:
 - `docs/USAGE.md` (end-to-end)
@@ -29,7 +29,7 @@ If you want deeper internals, see `docs/components/` (daemon, IPC, worktrees, or
 - Agents operate in isolated git worktrees.
 
 **Issue backends**
-- `tk` (file-based) is the default (stored in-repo under `.fugue/tickets/`).
+- `tk` (file-based) is the default (stored in-repo under `.murmur/tickets/`).
 - GitHub Issues backend.
 - Linear Issues backend (GraphQL API).
 
@@ -100,14 +100,14 @@ These are mandatory design constraints for the Rust implementation.
 
 ## 4) Process Topology (Runtime)
 
-Fugue runs as several cooperating local processes:
+Murmur runs as several cooperating local processes:
 
-1. **Daemon** (`fugue server start`)
+1. **Daemon** (`mm server start`)
    - Owns long-lived state: registered projects, running orchestrators, agents, pending approvals.
    - Exposes a Unix socket IPC API.
    - Broadcasts streaming events to attached clients (`attach`).
 
-2. **CLI** (`fugue ...`)
+2. **CLI** (`murmur ...`)
    - Sends request/response messages to the daemon for almost all commands.
    - Also provides hook commands invoked by Claude Code (permission hooks, idle notifications).
 
@@ -120,15 +120,15 @@ Fugue runs as several cooperating local processes:
 
 ## 5) On-Disk Layout
 
-Default base directory: `~/.fugue/` (override with `FUGUE_DIR`).
+Default base directory: `~/.murmur/` (override with `MURMUR_DIR`).
 
 Suggested layout:
 
 ```
-~/.fugue/
-  fugue.sock
-  fugue.pid
-  fugue.log
+~/.murmur/
+  murmur.sock
+  murmur.pid
+  murmur.log
   plans/
     <id>.md
   runtime/
@@ -146,10 +146,10 @@ Suggested layout:
 
 Config locations:
 
-- Global config: `~/.config/fugue/config.toml` (or `$FUGUE_DIR/config/config.toml`)
-- Global permissions: `~/.config/fugue/permissions.toml` (or `$FUGUE_DIR/config/permissions.toml`)
+- Global config: `~/.config/murmur/config.toml` (or `$MURMUR_DIR/config/config.toml`)
+- Global permissions: `~/.config/murmur/permissions.toml` (or `$MURMUR_DIR/config/permissions.toml`)
 
-`FUGUE_DIR` overrides base paths for local testing/isolation.
+`MURMUR_DIR` overrides base paths for local testing/isolation.
 
 ---
 
@@ -227,15 +227,15 @@ Common interface:
 - `commit()` for `tk` (git add/commit/push), no-op for API backends
 
 Includes:
-- `tk`: files in `.fugue/tickets/` within the project repo clone
+- `tk`: files in `.murmur/tickets/` within the project repo clone
 - GitHub Issues (API-backed)
 - Linear Issues (API-backed)
 
-For the canonical `.fugue/tickets/*.md` format, see `docs/TICKETS.md`.
+For the canonical `.murmur/tickets/*.md` format, see `docs/TICKETS.md`.
 
 #### GitHub backend (GraphQL API)
 
-Fugue speaks to GitHub Issues via the GraphQL API.
+Murmur speaks to GitHub Issues via the GraphQL API.
 
 Requirements:
 - `owner/repo` is detected from the project repo’s `origin` remote URL (must be a GitHub remote).
@@ -244,7 +244,7 @@ Requirements:
 
 #### Linear backend (GraphQL API)
 
-Fugue speaks to Linear via the GraphQL API.
+Murmur speaks to Linear via the GraphQL API.
 
 Requirements:
 - API key is sourced from `[providers.linear].api-key` or `LINEAR_API_KEY`.
@@ -253,16 +253,16 @@ Requirements:
 ### 7.5 Permissions / Hooks
 
 Claude Code integration:
-- Claude invokes `fugue hook PreToolUse` with JSON stdin.
+- Claude invokes `mm hook PreToolUse` with JSON stdin.
 - Hook evaluates rules. If undecided, it asks the daemon and blocks for response.
 - Hook returns the decision JSON to Claude Code.
 
 Codex integration:
-- Codex uses built-in approval modes; Fugue cannot intercept tool execution.
+- Codex uses built-in approval modes; Murmur cannot intercept tool execution.
  
 ### 7.6 TUI
 
-Fugue ships a single-screen TUI (`fugue tui`) built on top of the daemon’s `attach` event stream. See `docs/TUI.md`.
+Murmur ships a single-screen TUI (`mm tui`) built on top of the daemon’s `attach` event stream. See `docs/TUI.md`.
 
 ---
 
@@ -349,7 +349,7 @@ Avoid attempting to fix upstream behavioral inconsistencies in this phase.
 
 Each coding agent:
 - gets a dedicated worktree under `projects/<project>/worktrees/wt-<agentid>/`
-- works on a branch `fugue/<agentid>` (naming can be finalized later)
+- works on a branch `murmur/<agentid>` (naming can be finalized later)
 
 On agent completion (`agent done`):
 - **direct** merge strategy:
@@ -424,9 +424,9 @@ Core:
 
 ## 12) Rust Codebase Structure (Implemented)
 
-Fugue is a Cargo workspace with explicit “core vs shell” boundaries:
+Murmur is a Cargo workspace with explicit “core vs shell” boundaries:
 
-### `crates/fugue-core/` (functional core)
+### `crates/murmur-core/` (functional core)
 
 - Pure domain values and deterministic logic.
 - No Tokio runtime; no filesystem/network/subprocess/socket I/O.
@@ -437,12 +437,12 @@ Fugue is a Cargo workspace with explicit “core vs shell” boundaries:
   - `permissions.rs` — rule evaluation for tool approvals
   - `paths.rs` — deterministic path resolution (inputs passed in)
 
-### `crates/fugue-protocol/` (wire DTOs)
+### `crates/murmur-protocol/` (wire DTOs)
 
 - Serde request/response/event types + message constants.
 - Defines IPC payload schemas and event schemas.
 
-### `crates/fugue/` (imperative shell)
+### `crates/murmur/` (imperative shell)
 
 - Tokio-based daemon + client + CLI.
 - Owns I/O and adapters:
@@ -453,8 +453,8 @@ Fugue is a Cargo workspace with explicit “core vs shell” boundaries:
   - CLI entrypoint (`src/main.rs`)
 
 Dependency direction:
-- `fugue` depends on `fugue-core` and `fugue-protocol`.
-- `fugue-core` and `fugue-protocol` are independent of the shell crate and avoid I/O.
+- `murmur` depends on `murmur-core` and `murmur-protocol`.
+- `murmur-core` and `murmur-protocol` are independent of the shell crate and avoid I/O.
 
 ---
 
@@ -491,7 +491,7 @@ Avoid adding new metrics systems or tracing pipelines; keep it simple and local.
 - Project registry + clone-on-add
 - Worktree creation per agent
 - Orchestrator polling + spawning
-- Issue backends: `tk` (`.fugue/tickets/`), GitHub Issues, Linear Issues
+- Issue backends: `tk` (`.murmur/tickets/`), GitHub Issues, Linear Issues
 - In-memory claim registry
 - Agent spawn + streaming parse + chat history buffer
 - `agent done` path + merge strategy “direct”

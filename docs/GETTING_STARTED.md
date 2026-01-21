@@ -1,6 +1,6 @@
 # Getting Started
 
-Fugue is a local-only agent orchestration supervisor (daemon + CLI).
+Murmur is a local-only agent orchestration supervisor (daemon + CLI).
 
 For a full guide, see:
 - `docs/USAGE.md`
@@ -19,22 +19,22 @@ For a full guide, see:
 From the repo root:
 
 ```bash
-cargo install --locked --path crates/fugue
+cargo install --locked --path crates/murmur
 ```
 
-This installs `fugue` into Cargo’s bin dir (usually `~/.cargo/bin`).
+This installs `mm` into Cargo’s bin dir (usually `~/.cargo/bin`).
 
 Verify:
 
 ```bash
-command -v fugue
-fugue version
+command -v mm
+mm version
 ```
 
 Upgrade after pulling new commits:
 
 ```bash
-cargo install --locked --path crates/fugue --force
+cargo install --locked --path crates/murmur --force
 ```
 
 ## Quickstart (2 Terminals)
@@ -42,58 +42,58 @@ cargo install --locked --path crates/fugue --force
 Terminal A (daemon):
 
 ```bash
-fugue server start --foreground
+mm server start --foreground
 ```
 
 Terminal B (CLI):
 
 ```bash
-fugue agent list
+mm agent list
 ```
 
-Add a project (clones into `$FUGUE_DIR/projects/<name>/repo/`):
+Add a project (clones into the base directory under `~/.murmur/projects/<name>/repo/` by default):
 
 ```bash
-fugue project add <path-or-url> --name myproj
+mm project add <path-or-url> --name myproj
 ```
 
 Start orchestration:
 
 ```bash
-fugue project start myproj
+mm project start myproj
 ```
 
 Optional: stream daemon events:
 
 ```bash
-fugue attach
+mm attach
 ```
 
 ## Using a Custom Base Directory (Optional)
 
-By default, Fugue stores its local state under `~/.fugue` and config under `~/.config/fugue`.
+By default, Murmur stores its local state under `~/.murmur` and config under `~/.config/murmur`.
 
-If you want an isolated environment for testing, set `FUGUE_DIR` (or pass `--fugue-dir`):
+If you want an isolated environment for testing, set `MURMUR_DIR` (or pass `--murmur-dir`):
 
 ```bash
-export FUGUE_DIR=/tmp/fugue-dev
-fugue server start --foreground
+export MURMUR_DIR=/tmp/murmur-dev
+mm server start --foreground
 ```
 
 Or:
 
 ```bash
-fugue --fugue-dir /tmp/fugue-dev server start --foreground
+mm --murmur-dir /tmp/murmur-dev server start --foreground
 ```
 
 ## Issue Backends
 
 ### Local tickets (`tk`)
 
-Tickets live in the project repo clone under `.fugue/tickets/`.
+Tickets live in the project repo clone under `.murmur/tickets/`.
 
-- Create: `fugue issue create --project myproj "Title"`
-- Ready list: `fugue issue ready --project myproj`
+- Create: `mm issue create --project myproj "Title"`
+- Ready list: `mm issue ready --project myproj`
 
 Format details: `docs/TICKETS.md`.
 
@@ -109,7 +109,7 @@ Requirements:
 Switch backend:
 
 ```bash
-fugue project config set myproj issue-backend github
+mm project config set myproj issue-backend github
 ```
 
 ### Linear Issues
@@ -120,12 +120,12 @@ Requirements:
   - `LINEAR_API_KEY=...`
   - `[providers.linear].api-key = "..."`
 - A team id on the project:
-  - `fugue project config set myproj linear-team <team-uuid>`
+  - `mm project config set myproj linear-team <team-uuid>`
 
 Switch backend:
 
 ```bash
-fugue project config set myproj issue-backend linear
+mm project config set myproj issue-backend linear
 ```
 
 ## Planner & Manager
@@ -133,19 +133,19 @@ fugue project config set myproj issue-backend linear
 Start a planner (creates `plans/<id>.md`):
 
 ```bash
-fugue agent plan --project myproj "Plan the next sprint"
+mm agent plan --project myproj "Plan the next sprint"
 ```
 
 Show the plan file:
 
 ```bash
-fugue plan read plan-1
+mm plan read plan-1
 ```
 
 Start a project manager agent:
 
 ```bash
-fugue manager start myproj
+mm manager start myproj
 ```
 
 ## Webhooks (Optional)

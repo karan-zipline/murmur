@@ -4,10 +4,10 @@
 **/*.rmeta
 **/*.dSYM/
 
-# --- Fugue runtime / local state ---
-.fugue/
-fugue.sock
-fugue.log
+# --- Murmur runtime / local state ---
+.murmur/
+murmur.sock
+murmur.log
 **/*.sock
 **/*.pid
 **/*.log

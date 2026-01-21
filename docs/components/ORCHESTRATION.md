@@ -6,10 +6,10 @@ Orchestration is the per-project loop that:
 - maintains a claim registry to avoid duplicate work
 
 Code pointers:
-- Pure scheduling decision: `crates/fugue-core/src/orchestration.rs`
-- Daemon loop: `crates/fugue/src/daemon/orchestration.rs`
-- RPC control: `crates/fugue/src/daemon/rpc/orchestration.rs`
-- Claims: `crates/fugue-core/src/claims.rs`
+- Pure scheduling decision: `crates/murmur-core/src/orchestration.rs`
+- Daemon loop: `crates/murmur/src/daemon/orchestration.rs`
+- RPC control: `crates/murmur/src/daemon/rpc/orchestration.rs`
+- Claims: `crates/murmur-core/src/claims.rs`
 
 ---
 
@@ -25,7 +25,7 @@ The “how many and which issues should we spawn?” logic is pure:
 - Output:
   - `SpawnPlan { issue_ids: Vec<String> }`
 
-This logic lives in `fugue-core` (`orchestrator_tick`).
+This logic lives in `murmur-core` (`orchestrator_tick`).
 
 The daemon provides the inputs and executes the returned plan.
 
@@ -42,8 +42,8 @@ Claims prevent duplicate work:
   - `project remove`
 
 Inspect via CLI:
-- `fugue claim list --project myproj`
-- `fugue claims --project myproj`
+- `murmur claim list --project myproj`
+- `mm claims --project myproj`
 
 ---
 
@@ -52,7 +52,7 @@ Inspect via CLI:
 At each tick:
 1. Query ready issues from the configured backend.
 2. Apply any backend-specific “ready” semantics (blocked status, allowed authors, etc).
-3. Compute a spawn plan via `fugue-core`.
+3. Compute a spawn plan via `murmur-core`.
 4. Spawn up to `available_slots = max_agents - active_agents` new agents.
 
 Agents are created in dedicated worktrees:
@@ -65,8 +65,8 @@ Details: `docs/components/WORKTREES_AND_MERGE.md`.
 ## Completion and Refill
 
 When an agent completes (`agent done`):
-- Fugue merges the agent branch (direct merge strategy).
-- Fugue closes the issue (backend-specific).
+- Murmur merges the agent branch (direct merge strategy).
+- Murmur closes the issue (backend-specific).
 - The claim is released.
 - The orchestrator can spawn the next ready issue on the next tick.
 

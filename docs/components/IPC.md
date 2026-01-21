@@ -1,14 +1,14 @@
 # IPC Protocol (Unix Socket + JSONL)
 
-Fugue uses a local-only IPC protocol:
-- Transport: Unix domain socket (`fugue.sock`). By default, the socket is placed in `XDG_RUNTIME_DIR` when available; when `FUGUE_DIR` is set, the socket is placed under `$FUGUE_DIR/fugue.sock`.
+Murmur uses a local-only IPC protocol:
+- Transport: Unix domain socket (`murmur.sock`). By default, the socket is placed in `XDG_RUNTIME_DIR` when available; when `MURMUR_DIR` is set, the socket is placed under `$MURMUR_DIR/murmur.sock`.
 - Framing: JSONL (one JSON object per line)
 - Message types: request/response + out-of-band events
 
 Code pointers:
-- Protocol types/constants: `crates/fugue-protocol/src/lib.rs`
-- JSONL framing: `crates/fugue/src/ipc/jsonl.rs`
-- Server router: `crates/fugue/src/daemon/server.rs`
+- Protocol types/constants: `crates/murmur-protocol/src/lib.rs`
+- JSONL framing: `crates/murmur/src/ipc/jsonl.rs`
+- Server router: `crates/murmur/src/daemon/server.rs`
 
 ---
 
@@ -144,4 +144,4 @@ The daemon emits:
 - `agent.idle`
 - `orchestration.tick_requested` (from webhooks or internal triggers)
 
-Event payloads are defined in `crates/fugue-protocol/src/lib.rs`.
+Event payloads are defined in `crates/murmur-protocol/src/lib.rs`.

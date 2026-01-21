@@ -1,13 +1,13 @@
 # Planner and Manager Agents
 
-Fugue has two “non-coding” agent modes:
+Murmur has two “non-coding” agent modes:
 - planners (produce plan artifacts under `plans/`)
 - a per-project manager agent (interactive coordinator)
 
 Code pointers:
-- Planner RPC: `crates/fugue/src/daemon/rpc/plan.rs`
-- Plan storage commands: `crates/fugue/src/main.rs` (`plan list/read/write`)
-- Manager RPC: `crates/fugue/src/daemon/rpc/manager.rs`
+- Planner RPC: `crates/murmur/src/daemon/rpc/plan.rs`
+- Plan storage commands: `crates/murmur/src/main.rs` (`plan list/read/write`)
+- Manager RPC: `crates/murmur/src/daemon/rpc/manager.rs`
 
 ---
 
@@ -18,7 +18,7 @@ Code pointers:
 A planner is an agent with role `planner`:
 - visible via the CLI like any other agent
 - chat messages are recorded and streamed like any other agent
-- expected to write a plan markdown file via `fugue plan write`
+- expected to write a plan markdown file via `mm plan write`
 
 ### Plan IDs and plan files
 
@@ -30,18 +30,18 @@ The daemon creates an initial plan file containing prompt metadata.
 
 ### Running vs stored plans
 
-- “Running planners” are controlled via IPC (exposed via `fugue agent plan ...`).
+- “Running planners” are controlled via IPC (exposed via `mm agent plan ...`).
 - “Stored plans” are just markdown files under `plans/` and are managed by:
-  - `fugue plan list` (stored)
-  - `fugue plan read <id>`
-  - `fugue plan write` (stdin → file)
+  - `mm plan list` (stored)
+  - `mm plan read <id>`
+  - `mm plan write` (stdin → file)
 
 The `agent plan ...` command is a CLI alias that controls running planners.
 
 ### Project-less planners
 
 Planners can be started without a project:
-- workdir under `~/.fugue/planners/<id>/` (or `$FUGUE_DIR/planners/<id>/`)
+- workdir under `~/.murmur/planners/<id>/` (or `$MURMUR_DIR/planners/<id>/`)
 - backend defaults to `claude`
 
 This is useful for general planning not tied to a repo.
@@ -75,7 +75,7 @@ On start, the manager is initialized with a project-aware system prompt and then
 
 Manager agents use a conservative tool allow-list:
 - loaded from the global permissions file `[manager].allowed_patterns`
-  - default: `["fugue:*"]`
-- default is `["fugue:*"]`
+  - default: `["murmur:*"]`
+- default is `["murmur:*"]`
 
 See `docs/components/PERMISSIONS_AND_QUESTIONS.md`.

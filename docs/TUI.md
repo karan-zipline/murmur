@@ -1,11 +1,11 @@
 # TUI
 
-`fugue tui` is a single-screen terminal UI that connects to the daemon, shows agents + chat, and supports the core interactive loops: approvals, AskUserQuestion answers, planner start, and abort flows.
+`mm tui` is a single-screen terminal UI that connects to the daemon, shows agents + chat, and supports the core interactive loops: approvals, AskUserQuestion answers, planner start, and abort flows.
 
 ## Run
 
-- Start daemon: `fugue server start --foreground`
-- Start TUI: `fugue tui`
+- Start daemon: `mm server start --foreground`
+- Start TUI: `mm tui`
 
 ## Layout
 
@@ -46,7 +46,7 @@ Agents with pending permissions are marked with `P` in the agent list.
 
 ## Tool Events (Hidden by Default)
 
-By default, Fugue hides tool invocations/results in chat to keep the UI uncluttered.
+By default, Murmur hides tool invocations/results in chat to keep the UI uncluttered.
 
 - Press `t` to toggle tool events on/off.
 - When shown, tool lines use the same semantics as the CLI:
@@ -68,10 +68,10 @@ Agents with pending questions are marked with `Q` in the agent list.
 If the daemon restarts or the event stream drops:
 
 - The header shows `disconnected`.
-- Fugue retries automatically with exponential backoff.
+- Murmur retries automatically with exponential backoff.
 - Press `r` to force an immediate reconnect.
 
-On reconnect, Fugue refreshes lists and re-fetches the selected agent’s history.
+On reconnect, Murmur refreshes lists and re-fetches the selected agent’s history.
 
 ## Rich Text Rendering
 

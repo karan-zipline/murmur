@@ -1,6 +1,6 @@
 # Storage Layout and Persistence
 
-Fugue is local-only and stores both:
+Murmur is local-only and stores both:
 - runtime state (socket/logs, agent metadata, dedup)
 - project clones and worktrees
 - plan artifacts
@@ -8,20 +8,20 @@ Fugue is local-only and stores both:
 This doc is about *where* data lives and the persistence semantics.
 
 Code pointers:
-- Path resolution: `crates/fugue-core/src/paths.rs`
-- Config persistence: `crates/fugue/src/config_store.rs`
-- Agent runtime persistence: `crates/fugue/src/runtime_store.rs`
-- Webhook dedup persistence: `crates/fugue/src/dedup_store.rs`
+- Path resolution: `crates/murmur-core/src/paths.rs`
+- Config persistence: `crates/murmur/src/config_store.rs`
+- Agent runtime persistence: `crates/murmur/src/runtime_store.rs`
+- Webhook dedup persistence: `crates/murmur/src/dedup_store.rs`
 
 ---
 
-## Base Directory (`~/.fugue`)
+## Base Directory (`~/.murmur`)
 
-Default base directory is `~/.fugue`.
+Default base directory is `~/.murmur`.
 
 To override everything (recommended for local testing), set:
 
-`FUGUE_DIR=/tmp/fugue-dev`
+`MURMUR_DIR=/tmp/murmur-dev`
 
 ---
 
@@ -30,8 +30,8 @@ To override everything (recommended for local testing), set:
 Under the base directory:
 
 ```
-<FUGUE_DIR or ~/.fugue>/
-  fugue.log
+<MURMUR_DIR or ~/.murmur>/
+  murmur.log
   plans/
     plan-1.md
   runtime/
@@ -49,16 +49,16 @@ Under the base directory:
 Under the config directory:
 
 ```
-<~/.config/fugue or $FUGUE_DIR/config>/
+<~/.config/murmur or $MURMUR_DIR/config>/
   config.toml
   permissions.toml
 ```
 
 Notes:
 - A reference permissions template ships in the repo as `permissions.toml.default`.
-- The `tk` backend stores issues inside the project repo clone under `.fugue/tickets/`.
+- The `tk` backend stores issues inside the project repo clone under `.murmur/tickets/`.
 - `project remove` unregisters a project; by default it does *not* delete the repo clone.
-- The daemon socket is a Unix domain socket named `fugue.sock`. By default it is placed in `XDG_RUNTIME_DIR` when available; when `FUGUE_DIR` is set, it is placed under `$FUGUE_DIR/fugue.sock`.
+- The daemon socket is a Unix domain socket named `murmur.sock`. By default it is placed in `XDG_RUNTIME_DIR` when available; when `MURMUR_DIR` is set, it is placed under `$MURMUR_DIR/murmur.sock`.
 
 ---
 
@@ -81,7 +81,7 @@ Notes:
 - Prevents repeated tick requests from identical deliveries.
 - Written atomically (write temp file + rename).
 
-### Logs (`fugue.log`)
+### Logs (`murmur.log`)
 
 - Structured logs written to the base directory.
 - Useful for debugging daemon startup, IPC, agent spawn, merge failures.

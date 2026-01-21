@@ -1,8 +1,7 @@
 [workspace]
 members = [
-  "crates/fugue",
-  "crates/fugue-core",
-  "crates/fugue-protocol",
+  "crates/murmur",
+  "crates/murmur-core",
+  "crates/murmur-protocol",
 ]
 resolver = "2"
-

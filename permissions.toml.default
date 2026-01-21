@@ -1,5 +1,5 @@
-# Default fugue permissions - safe global rules
-# Copy to ~/.config/fugue/permissions.toml (or $FUGUE_DIR/config/permissions.toml)
+# Default murmur permissions - safe global rules
+# Copy to ~/.config/murmur/permissions.toml (or $MURMUR_DIR/config/permissions.toml)
 #
 # Rules are evaluated in order (project rules first, then global, then built-in defaults).
 # First matching rule wins. Actions: allow, deny, pass
@@ -108,8 +108,8 @@ patterns = [
   "tree:*",
   # Ticket backend (local files only)
   "tk:*",
-  # fugue agent commands (issue tracking, agent lifecycle)
-  "fugue:*",
+  # mm commands (issue tracking, agent lifecycle)
+  "mm:*",
   # Safe text utilities
   "cat:*",
   "diff:*",
@@ -124,5 +124,4 @@ patterns = [
 # =============================================================================
 
 [manager]
-allowed_patterns = ["fugue:*"]
-
+allowed_patterns = ["mm:*"]

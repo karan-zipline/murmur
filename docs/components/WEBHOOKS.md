@@ -1,14 +1,14 @@
 # Webhooks
 
-Fugue can optionally run a local webhook server to receive:
+Murmur can optionally run a local webhook server to receive:
 - GitHub issue/issue_comment events
 - Linear Issue/Comment events
 
 The webhook server is local-only and is intended to trigger orchestration ticks quickly (instead of waiting for the next poll interval).
 
 Code pointers:
-- Implementation: `crates/fugue/src/daemon/webhook.rs`
-- Dedup store: `crates/fugue/src/dedup_store.rs`
+- Implementation: `crates/murmur/src/daemon/webhook.rs`
+- Dedup store: `crates/murmur/src/dedup_store.rs`
 
 ---
 
@@ -25,7 +25,7 @@ secret = "shared-secret"
 ```
 
 Notes:
-- If `bind-addr` is `:8080`, Fugue binds `0.0.0.0:8080`.
+- If `bind-addr` is `:8080`, Murmur binds `0.0.0.0:8080`.
 - The path prefix defaults to `/webhooks`.
 
 ---
@@ -43,7 +43,7 @@ Linear:
 
 Project routing:
 - Prefer query parameter `project=<name>`
-- Otherwise, Fugue checks headers: `X-Fugue-Project`, `X-Project`
+- Otherwise, Murmur checks headers: `X-Murmur-Project`, `X-Project`
 
 ---
 
@@ -74,7 +74,7 @@ Dedup is stored under:
 ## What a Webhook Does
 
 When a relevant webhook arrives:
-- Fugue emits an `orchestration.tick_requested` event
-- if orchestration is running for the project, Fugue requests an immediate tick
+- Murmur emits an `orchestration.tick_requested` event
+- if orchestration is running for the project, Murmur requests an immediate tick
 
 The orchestrator loop still enforces max-agent capacity and claims.

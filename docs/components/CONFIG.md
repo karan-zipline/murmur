@@ -1,15 +1,15 @@
 # Configuration (`config.toml`)
 
-Fugue reads global configuration from `config.toml`.
+Murmur reads global configuration from `config.toml`.
 
 Paths:
-- Default: `~/.config/fugue/config.toml`
-- If `FUGUE_DIR` is set: `$FUGUE_DIR/config/config.toml`
+- Default: `~/.config/murmur/config.toml`
+- If `MURMUR_DIR` is set: `$MURMUR_DIR/config/config.toml`
 
 Code pointers:
-- Schema + validation: `crates/fugue-core/src/config.rs`
-- Load/save: `crates/fugue/src/config_store.rs`
-- CLI mutations: `crates/fugue/src/main.rs` (`project config ...`)
+- Schema + validation: `crates/murmur-core/src/config.rs`
+- Load/save: `crates/murmur/src/config_store.rs`
+- CLI mutations: `crates/murmur/src/main.rs` (`project config ...`)
 
 ---
 
@@ -17,7 +17,7 @@ Code pointers:
 
 ### Log level
 
-CLI flag: `--log-level <LEVEL>` (also via env `FUGUE_LOG`)
+CLI flag: `--log-level <LEVEL>` (also via env `MURMUR_LOG`)
 
 ### Providers
 
@@ -44,7 +44,7 @@ OpenAI (LLM auth):
 
 ### LLM authorization
 
-When a project uses `permissions-checker = "llm"`, Fugue uses `[llm_auth]` to decide tool permissions automatically. In LLM mode, Fugue is fail-closed: if authorization fails or the model is unsure, the request is denied (no manual fallback).
+When a project uses `permissions-checker = "llm"`, Murmur uses `[llm_auth]` to decide tool permissions automatically. In LLM mode, Murmur is fail-closed: if authorization fails or the model is unsure, the request is denied (no manual fallback).
 
 ```toml
 [llm_auth]
@@ -86,8 +86,8 @@ Each project stores:
 - `merge-strategy` — `direct | pull-request`
 
 You can inspect and edit via:
-- `fugue project config show <project>`
-- `fugue project config get <project> <key>`
-- `fugue project config set <project> <key> <value>`
+- `mm project config show <project>`
+- `mm project config get <project> <key>`
+- `mm project config set <project> <key> <value>`
 
-Validation rules are enforced by `fugue-core` (`ConfigFile::validate`).
+Validation rules are enforced by `murmur-core` (`ConfigFile::validate`).
