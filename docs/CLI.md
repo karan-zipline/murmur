@@ -14,11 +14,15 @@ If you’re looking for end-to-end usage, start at `docs/USAGE.md`.
 
 Most examples use `FUGUE_DIR=/tmp/fugue-dev` so everything is isolated:
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- <command...>`
+`FUGUE_DIR=/tmp/fugue-dev fugue <command...>`
 
 You can also use the `--fugue-dir` flag (equivalent to setting `FUGUE_DIR`):
 
-`cargo run -p fugue -- --fugue-dir /tmp/fugue-dev <command...>`
+`fugue --fugue-dir /tmp/fugue-dev <command...>`
+
+If you’re running from a working tree without installing, use:
+
+`cargo run -p fugue -- <command...>`
 
 ### Output formats
 

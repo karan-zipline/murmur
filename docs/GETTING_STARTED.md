@@ -14,27 +14,66 @@ For a full guide, see:
   - `claude` (Claude Code)
   - `codex` (Codex CLI)
 
-## Quickstart
+## Install from Source (Recommended)
+
+From the repo root:
+
+```bash
+cargo install --locked --path crates/fugue
+```
+
+This installs `fugue` into Cargo’s bin dir (usually `~/.cargo/bin`).
+
+Verify:
+
+```bash
+command -v fugue
+fugue version
+```
+
+Upgrade after pulling new commits:
+
+```bash
+cargo install --locked --path crates/fugue --force
+```
+
+## Quickstart (2 Terminals)
+
+Pick a base directory for Fugue’s local state (recommended for testing):
+
+```bash
+export FUGUE_DIR=/tmp/fugue-dev
+```
 
 Terminal A (daemon):
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- server start --foreground`
+```bash
+fugue server start --foreground
+```
 
 Terminal B (CLI):
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- agent list`
+```bash
+fugue agent list
+```
 
 Add a project (clones into `$FUGUE_DIR/projects/<name>/repo/`):
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- project add <path-or-url> [--name myproj]`
+```bash
+fugue project add <path-or-url> --name myproj
+```
 
 Start orchestration:
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- project start myproj`
+```bash
+fugue project start myproj
+```
 
 Optional: stream daemon events:
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- attach`
+```bash
+fugue attach
+```
 
 ## Issue Backends
 
@@ -42,8 +81,8 @@ Optional: stream daemon events:
 
 Tickets live in the project repo clone under `.fugue/tickets/`.
 
-- Create: `FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- issue create --project myproj "Title"`
-- Ready list: `FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- issue ready --project myproj`
+- Create: `fugue issue create --project myproj "Title"`
+- Ready list: `fugue issue ready --project myproj`
 
 Format details: `docs/TICKETS.md`.
 
@@ -58,7 +97,9 @@ Requirements:
 
 Switch backend:
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- project config set myproj issue-backend github`
+```bash
+fugue project config set myproj issue-backend github
+```
 
 ### Linear Issues
 
@@ -68,25 +109,33 @@ Requirements:
   - `LINEAR_API_KEY=...`
   - `[providers.linear].api-key = "..."`
 - A team id on the project:
-  - `FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- project config set myproj linear-team <team-uuid>`
+  - `fugue project config set myproj linear-team <team-uuid>`
 
 Switch backend:
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- project config set myproj issue-backend linear`
+```bash
+fugue project config set myproj issue-backend linear
+```
 
 ## Planner & Manager
 
 Start a planner (creates `plans/<id>.md`):
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- agent plan --project myproj "Plan the next sprint"`
+```bash
+fugue agent plan --project myproj "Plan the next sprint"
+```
 
 Show the plan file:
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- plan read plan-1`
+```bash
+fugue plan read plan-1
+```
 
 Start a project manager agent:
 
-`FUGUE_DIR=/tmp/fugue-dev cargo run -p fugue -- manager start myproj`
+```bash
+fugue manager start myproj
+```
 
 ## Webhooks (Optional)
 
