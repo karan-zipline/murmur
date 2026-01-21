@@ -83,6 +83,34 @@ pub(in crate::daemon) async fn handle_manager_start(
     };
 
     let wtm = WorktreeManager::new(&shared.git, &shared.paths);
+
+    // Clean up orphaned worktree if it exists but manager isn't registered in memory.
+    // This can happen after daemon restart when the worktree wasn't cleaned up.
+    let orphan_wt_dir = wtm
+        .project_worktrees_dir(project)
+        .join(format!("wt-{manager_id}"));
+    if orphan_wt_dir.exists() {
+        tracing::info!(
+            manager_id = %manager_id,
+            worktree = %orphan_wt_dir.display(),
+            "cleaning up orphaned manager worktree"
+        );
+        if let Err(err) = wtm.remove_worktree(project, &orphan_wt_dir).await {
+            tracing::warn!(
+                manager_id = %manager_id,
+                error = %err,
+                "failed to remove orphaned worktree via git, attempting force removal"
+            );
+            // Force remove the directory if git worktree remove fails
+            if let Err(rm_err) = tokio::fs::remove_dir_all(&orphan_wt_dir).await {
+                return error_response(
+                    req,
+                    &format!("cleanup orphaned worktree failed: {rm_err:#}"),
+                );
+            }
+        }
+    }
+
     let wt = match wtm.create_agent_worktree(project, &manager_id).await {
         Ok(v) => v,
         Err(err) => return error_response(req, &format!("create manager worktree: {err:#}")),
@@ -472,15 +500,49 @@ fn build_manager_prompt(project: &str) -> String {
 - Do NOT implement code changes yourself; file issues and let coding agents do the work.
 - Work happens in git worktrees; PR numbers/links are not available until after merges.
 
-## Useful commands
+## Murmur CLI Reference
 
-- mm project status {project}
-- mm agent list
-- mm claims --project {project}
-- mm project start {project}
-- mm project stop {project}
-- mm issue ready {project}
-- mm issue create {project} "Title" --description "..."
+IMPORTANT: The CLI binary is `mm`, not `murmur`. Always use `mm` for commands.
+
+### Server (Daemon) Management
+- `mm server start` — Start the daemon (add `--foreground` to run in foreground)
+- `mm server stop` — Stop the daemon
+- `mm server status` — Check if daemon is running
+- `mm server restart` — Restart the daemon
+
+### Project Management
+- `mm project list` — List all projects
+- `mm project status {project}` — Show project status
+- `mm project start {project}` — Start orchestration for project
+- `mm project stop {project}` — Stop orchestration for project
+- `mm project config show {project}` — Show project configuration
+- `mm project config get {project} <key>` — Get a config value
+- `mm project config set {project} <key> <value>` — Set a config value
+
+### Issues
+- `mm issue list --project {project}` — List all issues
+- `mm issue ready --project {project}` — List ready issues (open, no open deps)
+- `mm issue show <ID> --project {project}` — Show issue details
+- `mm issue create "Title" --project {project}` — Create a new issue
+- `mm issue create "Title" --project {project} --description "Details" --type task --priority 1`
+- `mm issue update <ID> --project {project} --status blocked`
+- `mm issue update <ID> --project {project} --priority 2`
+- `mm issue close <ID> --project {project}` — Close an issue
+- `mm issue comment <ID> --project {project} --body "Comment text"`
+- `mm issue commit --project {project}` — Commit and push ticket changes
+
+### Agents
+- `mm agent list` — List all agents
+- `mm agent list --project {project}` — List agents for this project
+- `mm agent create {project} <ISSUE-ID>` — Manually create an agent for an issue
+- `mm agent abort <agent-id>` — Abort an agent
+- `mm claims --project {project}` — Show which issues are claimed by agents
+
+### Planners
+- `mm agent plan --project {project} "Planning prompt"` — Start a planner agent
+- `mm agent plan list --project {project}` — List running planners
+- `mm plan list` — List stored plan files
+- `mm plan read <plan-id>` — Read a plan file
 
 "#
     )

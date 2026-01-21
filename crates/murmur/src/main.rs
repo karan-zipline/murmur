@@ -190,15 +190,40 @@ enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 enum ProjectConfigCommand {
+    /// Get a single configuration value
     Get {
         project: String,
         key: String,
     },
+    /// Set a configuration value
+    #[command(after_help = "\
+KEYS AND VALUES:
+  max-agents          Number of concurrent agents (1-10)
+  issue-backend       Issue source: tk, github, linear
+  agent-backend       AI backend: claude, codex
+  planner-backend     Override for planners: claude, codex
+  coding-backend      Override for coding agents: claude, codex
+  permissions-checker How to handle permissions: manual, llm
+  merge-strategy      How to merge completed work: direct, pull-request
+  autostart           Start orchestration on daemon start: true, false
+  allowed-authors     Filter issues by author (comma-separated)
+  linear-team         Linear team UUID (required for linear backend)
+  linear-project      Linear project UUID (optional filter)
+
+EXAMPLES:
+  mm project config set myproj max-agents 5
+  mm project config set myproj issue-backend github
+  mm project config set myproj merge-strategy pull-request
+  mm project config set myproj allowed-authors alice,bob,charlie
+")]
     Set {
         project: String,
+        /// Configuration key (see KEYS AND VALUES below)
         key: String,
+        /// Value to set
         value: String,
     },
+    /// Show all configuration values
     Show {
         project: String,
     },

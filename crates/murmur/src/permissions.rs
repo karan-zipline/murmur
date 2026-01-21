@@ -24,7 +24,7 @@ pub async fn load_rules(paths: &MurmurPaths, project: Option<&str>) -> Result<Ve
 }
 
 pub async fn load_manager_allowed_patterns(paths: &MurmurPaths) -> Result<Vec<String>> {
-    const DEFAULT: &[&str] = &["murmur:*"];
+    const DEFAULT: &[&str] = &["mm:*"];
 
     let Some(cfg) = load_permissions_file(&paths.permissions_file).await? else {
         return Ok(DEFAULT.iter().map(|s| s.to_string()).collect());
@@ -90,7 +90,7 @@ fn default_rules() -> Vec<Rule> {
             Action::Allow,
             &[
                 "tk:*",
-                "murmur :*",
+                "mm :*",
                 "git status:*",
                 "git diff:*",
                 "git log:*",
@@ -223,7 +223,7 @@ pattern = "rm :*"
         let paths = test_paths(&dir);
 
         let patterns = load_manager_allowed_patterns(&paths).await.unwrap();
-        assert!(patterns.iter().any(|p| p == "murmur:*"));
+        assert!(patterns.iter().any(|p| p == "mm:*"));
     }
 
     #[tokio::test]
@@ -238,13 +238,13 @@ pattern = "rm :*"
             &paths.permissions_file,
             r#"
 [manager]
-allowed_patterns = ["murmur:*", "git :*"]
+allowed_patterns = ["mm:*", "git :*"]
 "#,
         )
         .await
         .unwrap();
 
         let patterns = load_manager_allowed_patterns(&paths).await.unwrap();
-        assert_eq!(patterns, vec!["murmur:*".to_owned(), "git :*".to_owned()]);
+        assert_eq!(patterns, vec!["mm:*".to_owned(), "git :*".to_owned()]);
     }
 }

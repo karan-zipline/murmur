@@ -75,7 +75,15 @@ On start, the manager is initialized with a project-aware system prompt and then
 
 Manager agents use a conservative tool allow-list:
 - loaded from the global permissions file `[manager].allowed_patterns`
-  - default: `["murmur:*"]`
-- default is `["murmur:*"]`
+- default: `["mm:*"]` — allows the manager to run any `mm` CLI command
+
+**Note:** The CLI binary is `mm`, not `murmur`. The default pattern `mm:*` allows commands like `mm issue create`, `mm project status`, etc.
+
+To customize, add to your `~/.config/murmur/permissions.toml`:
+
+```toml
+[manager]
+allowed_patterns = ["mm:*", "git :*"]
+```
 
 See `docs/components/PERMISSIONS_AND_QUESTIONS.md`.
