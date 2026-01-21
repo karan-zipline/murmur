@@ -1,363 +1,598 @@
-# Using Murmur
+# Usage Guide
 
-Murmur is a local-only agent orchestration supervisor (daemon + CLI).
+This guide covers all Murmur features in depth. For a quick introduction, see [Getting Started](GETTING_STARTED.md).
 
-At a high level:
-- You run the daemon (`mm server start`).
-- You register one or more projects (`mm project add ...`).
-- You choose an issue backend per project (`tk`, GitHub, Linear).
-- You start orchestration (`mm project start ...`).
-- Murmur spawns agents in git worktrees, merges finished work, and closes issues.
-- You monitor/interact via the CLI, including approvals and user questions.
+## Table of Contents
 
-For internal design, see `docs/ARCHITECTURE.md`.
-
----
-
-## Prerequisites
-
-- Rust toolchain (`cargo`)
-- `git`
-- At least one agent CLI available on `PATH`:
-  - `claude` (Claude Code) and/or
-  - `codex` (Codex CLI)
-
-Optional (depending on backends):
-- GitHub token (`GITHUB_TOKEN` or `GH_TOKEN`)
-- Linear API key (`LINEAR_API_KEY`)
+- [Overview](#overview)
+- [The Daemon](#the-daemon)
+- [Managing Projects](#managing-projects)
+- [Issue Backends](#issue-backends)
+- [Orchestration](#orchestration)
+- [Working with Agents](#working-with-agents)
+- [Permissions and Approvals](#permissions-and-approvals)
+- [Planner Agents](#planner-agents)
+- [Manager Agents](#manager-agents)
+- [The Terminal UI](#the-terminal-ui)
+- [Webhooks](#webhooks)
+- [Configuration Reference](#configuration-reference)
+- [Environment Variables](#environment-variables)
 
 ---
 
-## Install / Build
+## Overview
 
-From the repo root:
+Murmur is a daemon-based orchestrator. The typical workflow is:
 
-- Install (recommended):
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. Start daemon          mm server start                       │
+│  2. Add projects          mm project add <url>                  │
+│  3. Create/import issues  mm issue create / GitHub / Linear    │
+│  4. Start orchestration   mm project start <project>            │
+│  5. Monitor & approve     mm tui                                │
+│  6. Agents complete work  (automatic merge & close)             │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-  ```bash
-  cargo install --locked --path crates/murmur
-  ```
-
-  Verify:
-
-  ```bash
-  mm version
-  ```
-
-- If you're hacking on Murmur locally and prefer not to install it, replace `mm ...` with:
-
-  ```bash
-  cargo run -p murmur --bin mm -- <args...>
-  ```
-
-- Build (no install):
-
-  ```bash
-  cargo build --workspace
-  ./target/debug/mm --help
-  ```
+All commands communicate with the daemon over a Unix socket. If the daemon isn't running, commands will fail with a connection error.
 
 ---
 
-## Runtime Directories
+## The Daemon
 
-Murmur is local-only and stores everything under a base directory.
+The daemon is the control plane. It manages projects, spawns agents, handles permissions, and coordinates merges.
 
-- Default base: `~/.murmur` (runtime state)
-- Default config: `~/.config/murmur` (config + permissions)
+### Starting the Daemon
 
-If you set `MURMUR_DIR` (or pass `--murmur-dir`), Murmur keeps *both* runtime files and config under that directory:
-- `<MURMUR_DIR>/config/config.toml`
-- `<MURMUR_DIR>/config/permissions.toml`
-- `<MURMUR_DIR>/murmur.sock`, `<MURMUR_DIR>/murmur.log`, `<MURMUR_DIR>/projects/`, `<MURMUR_DIR>/plans/`, `<MURMUR_DIR>/runtime/`
-
-Details: `docs/components/STORAGE.md`.
-
----
-
-## Using a Custom Base Directory (Optional)
-
-The default base directory (`~/.murmur`) is fine for normal usage.
-
-If you want an isolated environment (recommended for tests, demos, and CI):
-
+**Foreground** (recommended for development):
 ```bash
-export MURMUR_DIR=/tmp/murmur-dev
 mm server start --foreground
 ```
 
-Or pass a one-off override:
+**Background**:
+```bash
+mm server start
+```
+
+### Checking Status
 
 ```bash
-mm --murmur-dir /tmp/murmur-dev server start --foreground
+mm server status
+```
+
+Output shows whether the daemon is running and basic health info.
+
+### Stopping the Daemon
+
+```bash
+mm server stop
+```
+
+This gracefully shuts down orchestrators and agents.
+
+### Restarting
+
+```bash
+mm server restart
+```
+
+### Logs
+
+Daemon logs are written to `~/.murmur/murmur.log` (or `$MURMUR_DIR/murmur.log`).
+
+```bash
+tail -f ~/.murmur/murmur.log
 ```
 
 ---
 
-## Start / Stop the Daemon
+## Managing Projects
 
-Foreground daemon (good for development):
+Projects are git repositories that Murmur manages. Each project has its own configuration, agents, and worktrees.
 
-`mm server start --foreground`
+### Adding a Project
 
-Background start:
+```bash
+# From a URL (clones the repo)
+mm project add https://github.com/org/repo.git --name myproj
 
-`mm server start`
+# With options
+mm project add https://github.com/org/repo.git \
+  --name myproj \
+  --max-agents 5 \
+  --backend claude \
+  --autostart
+```
 
-Status / ping:
+The repository is cloned to `~/.murmur/projects/myproj/repo/`.
 
-- `mm server status`
+### Listing Projects
 
-Stop:
+```bash
+mm project list
+```
 
-`mm server stop`
+### Viewing Project Configuration
 
-Restart:
+```bash
+mm project config show myproj
+```
 
-`mm server restart`
+### Modifying Configuration
+
+```bash
+# Get a single value
+mm project config get myproj max-agents
+
+# Set a value
+mm project config set myproj max-agents 5
+mm project config set myproj issue-backend github
+mm project config set myproj agent-backend claude
+```
+
+### Project Status
+
+```bash
+mm project status myproj
+```
+
+Shows:
+- Whether the repo exists and matches the configured remote
+- Whether orchestration is running
+- Number of active agents
+
+### Removing a Project
+
+```bash
+# Unregister only (keeps files)
+mm project remove myproj
+
+# Also delete worktrees
+mm project remove myproj --delete-worktrees
+```
 
 ---
 
-## Add a Project
+## Issue Backends
 
-Murmur registers projects by cloning a remote URL into the base directory.
+Murmur supports three issue backends. Each project uses one backend at a time.
 
-Recommended (path-or-url; name inferred unless overridden):
+### Local Tickets (`tk`)
 
-`mm project add <path-or-url> [--name myproj]`
+The default backend. Issues are stored as Markdown files in the repository under `.murmur/tickets/`.
 
-Legacy-compatible form (explicit name + remote URL):
+```bash
+# Create an issue
+mm issue create --project myproj "Implement user authentication"
 
-`mm project add myproj --remote-url <git-url>`
+# With more details
+mm issue create --project myproj "Fix login bug" \
+  --description "Users can't log in with special characters in passwords" \
+  --type bug \
+  --priority 1
 
-List projects:
+# List issues
+mm issue list --project myproj
 
-`mm project list`
+# Show a specific issue
+mm issue show ISSUE-1 --project myproj
 
-Inspect project config:
+# List ready issues (open, no open dependencies)
+mm issue ready --project myproj
 
-`mm project config show myproj`
+# Update an issue
+mm issue update ISSUE-1 --project myproj --status blocked
+mm issue update ISSUE-1 --project myproj --priority 2
 
-Project health checks (remote origin match, repo exists, orchestration running):
+# Close an issue
+mm issue close ISSUE-1 --project myproj
 
-`mm project status myproj`
+# Add a comment
+mm issue comment ISSUE-1 --project myproj --body "Initial investigation complete"
 
-Remove a project (unregisters; repo remains on disk):
+# Commit and push ticket changes
+mm issue commit --project myproj
+```
 
-- Keep worktrees: `mm project remove myproj`
-- Delete worktrees: `mm project remove myproj --delete-worktrees`
-
-Component details:
-- `docs/components/CONFIG.md`
-- `docs/components/WORKTREES_AND_MERGE.md`
-
----
-
-## Choose an Issue Backend
-
-Each project has an `issue-backend` setting.
-
-### `tk` (local tickets)
-
-Tickets live inside the project repo clone, under `.murmur/tickets/`.
-
-- Create: `mm issue create --project myproj "Title"`
-- List: `mm issue list --project myproj`
-- Ready: `mm issue ready --project myproj`
-
-Ticket format: `docs/TICKETS.md`.
+See [TICKETS.md](TICKETS.md) for the file format specification.
 
 ### GitHub Issues
 
-Requirements:
-- `origin` remote for the project repo must be a GitHub URL (owner/repo detection).
-- Token via env or config:
-  - `GITHUB_TOKEN=...` (or `GH_TOKEN=...`)
-  - `[providers.github].token = "..."` (or `api-key`)
+Use GitHub Issues as your issue backend.
 
-Enable:
+**Setup:**
+```bash
+# Set your token (or add to config.toml)
+export GITHUB_TOKEN=ghp_...
 
-`mm project config set myproj issue-backend github`
+# Switch backend
+mm project config set myproj issue-backend github
+```
+
+**Optional: Filter by author**
+```bash
+# Only pick up issues from specific authors
+mm project config set myproj allowed-authors '["octocat", "dependabot"]'
+```
+
+The `owner/repo` is automatically detected from the project's git remote.
 
 ### Linear Issues
 
-Requirements:
-- API key via env or config:
-  - `LINEAR_API_KEY=...`
-  - `[providers.linear].api-key = "..."`
-- A team id (UUID) on the project:
-  - `mm project config set myproj linear-team <team-uuid>`
+Use Linear as your issue backend.
 
-Enable:
+**Setup:**
+```bash
+# Set your API key
+export LINEAR_API_KEY=lin_api_...
 
-`mm project config set myproj issue-backend linear`
+# Configure the project
+mm project config set myproj issue-backend linear
+mm project config set myproj linear-team YOUR_TEAM_UUID
 
-Backend details: `docs/components/ISSUE_BACKENDS.md`.
-
----
-
-## Start Orchestration
-
-Start orchestration for a project:
-
-`mm project start myproj`
-
-Stop:
-
-`mm project stop myproj`
-
-All projects:
-
-- Start: `mm project start --all`
-- Stop: `mm project stop --all`
-
-Claims (what issue is assigned to which agent):
-
-`mm claims --project myproj`
-
-Orchestration details: `docs/components/ORCHESTRATION.md`.
+# Optional: scope to a specific Linear project
+mm project config set myproj linear-project YOUR_PROJECT_UUID
+```
 
 ---
 
-## Work With Agents
+## Orchestration
 
-List running agents:
+Orchestration is the automatic spawning of agents for ready issues.
 
-`mm agent list`
+### Starting Orchestration
 
-Filter by project:
+```bash
+# Single project
+mm project start myproj
 
-`mm agent list --project myproj`
+# All projects
+mm project start --all
+```
 
-Abort:
+### Stopping Orchestration
 
-- `mm agent abort <agent-id>` (prompts)
-- `mm agent abort --yes <agent-id>` (no prompt)
+```bash
+mm project stop myproj
+mm project stop --all
+```
 
-Mark done (used by agents; can also be invoked manually):
+### How It Works
 
-`MURMUR_AGENT_ID=<agent-id> mm agent done`
+The orchestrator runs a loop (approximately every 10 seconds):
 
-Agent internals: `docs/components/AGENTS.md`.
+1. **Query ready issues** from the configured backend
+2. **Filter** issues that are already claimed
+3. **Spawn agents** up to `max-agents` for unclaimed issues
+4. **Claim** each issue to prevent duplicate work
 
----
+### Viewing Claims
 
-## Planner Agents + Stored Plans
+```bash
+mm claims --project myproj
+```
 
-Planner agents are “plan mode” agents that produce markdown artifacts under `plans/`.
+Shows which issues are assigned to which agents.
 
-Start a planner:
+### Auto-start
 
-`mm agent plan --project myproj "Plan the next sprint"`
+To start orchestration automatically when the daemon starts:
 
-List running planners:
-
-`mm agent plan list --project myproj`
-
-Stop a planner:
-
-`mm agent plan stop plan-1`
-
-List stored plan files:
-
-`mm plan list`
-
-Show stored plan contents:
-
-`mm plan read plan-1`
-
-`plan write` is intended to be called by the planning agent (stdin → file). It uses `MURMUR_AGENT_ID` as the plan id:
-
-`cat myplan.md | MURMUR_AGENT_ID=plan:plan-1 mm plan write`
-
-Planner details: `docs/components/PLANNER_AND_MANAGER.md`.
+```bash
+mm project config set myproj autostart true
+```
 
 ---
 
-## Manager Agent
+## Working with Agents
 
-Manager agents are project-scoped “interactive” agents (e.g., to ask questions about a codebase).
+Agents are AI coding assistants (Claude Code or Codex) working in isolated git worktrees.
 
-Start:
+### Listing Agents
 
-`mm manager start myproj`
+```bash
+# All agents
+mm agent list
 
-Status:
+# Filter by project
+mm agent list --project myproj
+```
 
-`mm manager status myproj`
+### Creating an Agent Manually
 
-Send message:
-Interact with the manager via the TUI: `mm tui`
+Normally the orchestrator creates agents, but you can create one manually:
 
-Stop:
+```bash
+mm agent create myproj ISSUE-1
+```
 
-`mm manager stop myproj`
+### Aborting an Agent
 
-Clear manager state:
+```bash
+# Interactive (prompts for confirmation)
+mm agent abort a-1
 
-`mm manager clear myproj`
+# Force without prompt
+mm agent abort a-1 --yes
 
----
+# Force kill if graceful abort fails
+mm agent abort a-1 --force
+```
 
-## Approvals (Permissions) + User Questions
+### Agent Lifecycle
 
-Claude Code agents can request permission to run tools via the `PreToolUse` hook.
-Murmur can also surface `AskUserQuestion` prompts as “questions”.
+1. **Starting** — Agent process is being spawned
+2. **Running** — Agent is actively working
+3. **Needs Resolution** — A merge conflict or error requires intervention
+4. **Exited** — Agent completed successfully
+5. **Aborted** — Agent was manually stopped
 
-Primary UI: use the TUI to review/respond:
+### Merge on Completion
 
-`mm tui`
+When an agent completes (`mm agent done`):
 
-Hidden CLI fallback (not shown in `--help`):
+1. Murmur rebases the agent branch onto `origin/<default-branch>`
+2. Performs a fast-forward merge
+3. Pushes to origin
+4. Closes the issue
+5. Releases the claim
+6. Removes the worktree
 
-List pending permission requests:
+If a merge conflict occurs, the agent transitions to "needs resolution" and the worktree is preserved for manual intervention.
 
-`mm permission list`
+### Branch Cleanup
 
-Respond:
+After agents complete, their branches may remain. Clean them up:
 
-- Allow: `mm permission respond <request-id> allow`
-- Deny: `mm permission respond <request-id> deny`
+```bash
+# Dry run (see what would be deleted)
+mm branch cleanup --dry-run
 
-List pending user questions:
+# Delete remote branches
+mm branch cleanup
 
-`mm question list`
-
-Respond (answers must be a JSON object of question-key to response text):
-
-`mm question respond <request-id> '{"q1":"answer"}'`
-
-Permissions internals: `docs/components/PERMISSIONS_AND_QUESTIONS.md`.
-
----
-
-## Attach (Live Stream)
-
-Stream live events to stdout (Ctrl-C detaches):
-
-- All projects: `mm attach`
-- Filtered: `mm attach myproj`
-
-Protocol: `docs/components/IPC.md`.
-
----
-
-## Branch Cleanup
-
-Delete merged `murmur/*` agent branches (remote by default; add `--local` for local refs):
-
-- Dry run: `mm branch cleanup --dry-run`
-- Delete: `mm branch cleanup`
-
-Details: `docs/components/WORKTREES_AND_MERGE.md`.
+# Also delete local branches
+mm branch cleanup --local
+```
 
 ---
 
-## Webhooks (Optional)
+## Permissions and Approvals
 
-If enabled, Murmur can receive GitHub/Linear webhooks and request orchestration ticks.
+Murmur intercepts Claude Code tool calls and can require approval before execution.
 
-Enable (example):
+### How It Works
+
+1. Agent attempts to use a tool (e.g., `Bash`, `Write`)
+2. Claude invokes `mm hook PreToolUse`
+3. Murmur evaluates permission rules
+4. If rules don't decide, the request goes to the daemon
+5. You approve/deny via TUI or CLI
+
+### Permission Rules
+
+Create `~/.config/murmur/permissions.toml`:
+
+```toml
+# Allow reading any file
+[[rules]]
+tool = "Read"
+action = "allow"
+
+# Allow specific bash commands
+[[rules]]
+tool = "Bash"
+action = "allow"
+pattern = "cargo *"
+
+[[rules]]
+tool = "Bash"
+action = "allow"
+pattern = "npm *"
+
+[[rules]]
+tool = "Bash"
+action = "allow"
+pattern = "git status"
+
+# Deny dangerous commands
+[[rules]]
+tool = "Bash"
+action = "deny"
+pattern = "rm -rf *"
+
+[[rules]]
+tool = "Bash"
+action = "deny"
+pattern = "sudo *"
+```
+
+Rules are evaluated in order. First match wins. If no rule matches, the request goes to manual approval.
+
+### Project-Specific Rules
+
+Create `~/.murmur/projects/myproj/permissions.toml` for project-specific rules. These are evaluated before global rules.
+
+### Manual Approval
+
+**Via TUI** (recommended):
+```bash
+mm tui
+# Press y to allow, n to deny when prompted
+```
+
+**Via CLI:**
+```bash
+mm permission list
+mm permission respond REQ-123 allow
+mm permission respond REQ-123 deny
+```
+
+### LLM-Based Approval
+
+Let an LLM decide permissions automatically:
+
+```bash
+mm project config set myproj permissions-checker llm
+```
+
+Configure the LLM in `config.toml`:
+
+```toml
+[llm_auth]
+provider = "anthropic"
+model = "claude-haiku-4-5"
+```
+
+LLM mode is fail-closed: if the LLM is unsure or there's an error, the request is denied.
+
+---
+
+## Planner Agents
+
+Planner agents explore codebases and write planning documents without implementing code.
+
+### Starting a Planner
+
+```bash
+mm agent plan --project myproj "Design the authentication system"
+```
+
+This creates a plan artifact at `~/.murmur/plans/plan-1.md`.
+
+### Listing Running Planners
+
+```bash
+mm agent plan list --project myproj
+```
+
+### Viewing Plan Output
+
+```bash
+mm plan list        # List all stored plans
+mm plan read plan-1 # Show plan contents
+```
+
+### Stopping a Planner
+
+```bash
+mm agent plan stop plan-1
+```
+
+### Project-less Planners
+
+Planners can run without a project for general planning:
+
+```bash
+mm agent plan "Compare authentication libraries for Node.js"
+```
+
+---
+
+## Manager Agents
+
+Manager agents are interactive coordinators for a project. They can explore the codebase, create issues, and monitor work—but they don't implement code themselves.
+
+### Starting a Manager
+
+```bash
+mm manager start myproj
+```
+
+### Interacting with the Manager
+
+Use the TUI to send messages:
+
+```bash
+mm tui
+# Select the manager agent and type your questions
+```
+
+### Manager Status
+
+```bash
+mm manager status myproj
+```
+
+### Stopping the Manager
+
+```bash
+mm manager stop myproj
+```
+
+### Clearing Manager History
+
+```bash
+mm manager clear myproj
+```
+
+### Manager Permissions
+
+Managers have restricted tool access by default. Configure in `permissions.toml`:
+
+```toml
+[manager]
+allowed_patterns = ["murmur:*", "git:*", "Read:*"]
+```
+
+---
+
+## The Terminal UI
+
+The TUI (`mm tui`) provides real-time monitoring and interaction.
+
+### Layout
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Header: Connection status, agent count, pending approvals      │
+├─────────────────────────────────────────────────────────────────┤
+│  Agent List          │  Chat View                               │
+│  ┌─────────────────┐ │  ┌─────────────────────────────────────┐ │
+│  │ a-1 myproj [R]  │ │  │ Assistant: I'll start by...        │ │
+│  │ a-2 myproj [R]  │ │  │ User: (tool approved)              │ │
+│  │ plan-1 [P]      │ │  │ Assistant: Now implementing...     │ │
+│  └─────────────────┘ │  └─────────────────────────────────────┘ │
+│  Recent Commits      │  Input (when composing)                  │
+│  ┌─────────────────┐ │  ┌─────────────────────────────────────┐ │
+│  │ abc123 Fix bug  │ │  │ Type your message...               │ │
+│  └─────────────────┘ │  └─────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Keybindings
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Switch focus between agent list and chat |
+| `j/k` | Move selection / scroll |
+| `PgUp/PgDn` | Page scroll in chat |
+| `Enter` | Open input to send a message |
+| `p` | Start a new planner |
+| `t` | Toggle tool call visibility |
+| `x` | Abort/stop selected agent |
+| `y/n` | Allow/deny permission (when prompted) |
+| `r` | Reconnect (if disconnected) |
+| `q` | Quit |
+
+### Permission Prompts
+
+When an agent needs approval, the chat pane shows the tool call details. Press `y` to allow or `n` to deny.
+
+### User Questions
+
+Agents can ask questions via `AskUserQuestion`. The TUI shows options—navigate with `j/k` and select with `y`, or choose "Other" for a custom answer.
+
+---
+
+## Webhooks
+
+Murmur can receive webhooks from GitHub or Linear to trigger immediate orchestration ticks.
+
+### Enable Webhooks
+
+In `config.toml`:
 
 ```toml
 [webhook]
@@ -367,4 +602,112 @@ path-prefix = "/webhooks"
 secret = "your-shared-secret"
 ```
 
-Details: `docs/components/WEBHOOKS.md`.
+### Endpoints
+
+- `GET /health` — Health check
+- `POST /webhooks/github?project=<name>` — GitHub webhook
+- `POST /webhooks/linear?project=<name>` — Linear webhook
+
+### Signature Verification
+
+- GitHub: Validates `X-Hub-Signature-256`
+- Linear: Validates `Linear-Signature`
+
+Both use HMAC-SHA256 with the configured secret.
+
+### Exposing Webhooks
+
+For local development, use a tunnel like ngrok:
+
+```bash
+ngrok http 8080
+```
+
+Then configure your GitHub/Linear webhook to point to the ngrok URL.
+
+---
+
+## Configuration Reference
+
+### Global Config (`~/.config/murmur/config.toml`)
+
+```toml
+log-level = "info"
+
+# Provider credentials
+[providers.github]
+token = "ghp_..."
+
+[providers.linear]
+api-key = "lin_api_..."
+
+[providers.anthropic]
+api-key = "sk-ant-..."
+
+[providers.openai]
+api-key = "sk-..."
+
+# LLM-based permission decisions
+[llm_auth]
+provider = "anthropic"
+model = "claude-haiku-4-5"
+
+# Webhook server
+[webhook]
+enabled = true
+bind-addr = "127.0.0.1:8080"
+path-prefix = "/webhooks"
+secret = "your-secret"
+
+# Project definitions
+[[projects]]
+name = "myproj"
+remote-url = "git@github.com:org/repo.git"
+max-agents = 3
+issue-backend = "github"
+agent-backend = "claude"
+permissions-checker = "manual"
+merge-strategy = "direct"
+autostart = true
+```
+
+### Project Settings
+
+| Setting | Values | Default | Description |
+|---------|--------|---------|-------------|
+| `name` | string | — | Project identifier |
+| `remote-url` | URL | — | Git remote URL |
+| `max-agents` | 1-10 | 3 | Max concurrent coding agents |
+| `issue-backend` | `tk`, `github`, `linear` | `tk` | Issue source |
+| `agent-backend` | `claude`, `codex` | `claude` | AI backend |
+| `coding-backend` | `claude`, `codex` | (inherits) | Override for coding agents |
+| `planner-backend` | `claude`, `codex` | (inherits) | Override for planners |
+| `permissions-checker` | `manual`, `llm` | `manual` | How to handle permissions |
+| `merge-strategy` | `direct`, `pull-request` | `direct` | How to merge completed work |
+| `autostart` | bool | false | Auto-start orchestration |
+| `allowed-authors` | list | [] | Filter issues by author (GitHub) |
+| `linear-team` | UUID | — | Required for Linear backend |
+| `linear-project` | UUID | — | Optional Linear project filter |
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `MURMUR_DIR` | Override base directory (default: `~/.murmur`) |
+| `MURMUR_LOG` | Log level filter (e.g., `debug`, `info`) |
+| `MURMUR_AGENT_ID` | Used by agent commands (`claim`, `done`, etc.) |
+| `GITHUB_TOKEN` / `GH_TOKEN` | GitHub API token |
+| `LINEAR_API_KEY` | Linear API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key (for LLM auth) |
+| `OPENAI_API_KEY` | OpenAI API key (for LLM auth) |
+| `FUGUE_HOOK_EXE` | Override hook command path |
+
+---
+
+## Further Reading
+
+- **[CLI Reference](CLI.md)** — Complete command documentation
+- **[Architecture](ARCHITECTURE.md)** — System design and internals
+- **[Component Docs](components/)** — Deep dives into specific subsystems

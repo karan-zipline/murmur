@@ -1,305 +1,647 @@
-# CLI Guide
+# CLI Reference
 
-This document describes Murmur’s CLI surface area and conventions.
+Complete reference for the `mm` command-line interface.
 
-Murmur is a daemon-first tool: most commands talk to a running daemon over a Unix socket.
+## Quick Reference
 
-If you’re looking for end-to-end usage, start at `docs/USAGE.md`.
+### Essential Commands
 
----
+| Command | Description |
+|---------|-------------|
+| `mm server start` | Start the daemon |
+| `mm server stop` | Stop the daemon |
+| `mm project add <url>` | Register a project |
+| `mm project start <name>` | Start orchestration |
+| `mm project stop <name>` | Stop orchestration |
+| `mm agent list` | List all agents |
+| `mm agent abort <id>` | Stop an agent |
+| `mm issue list -p <proj>` | List issues |
+| `mm issue create -p <proj> "title"` | Create an issue |
+| `mm tui` | Open terminal UI |
+| `mm attach` | Stream daemon events |
 
-## Conventions
+### Command Structure
 
-### Base directory (`MURMUR_DIR`)
+```
+mm [OPTIONS] <COMMAND> [ARGS]
 
-By default, Murmur stores runtime state under `~/.murmur` and config under `~/.config/murmur`.
-
-If you want an isolated environment (tests/demos/CI), set `MURMUR_DIR`:
-
-`MURMUR_DIR=/tmp/murmur-dev mm <command...>`
-
-You can also use the `--murmur-dir` flag (equivalent to setting `MURMUR_DIR`):
-
-`mm --murmur-dir /tmp/murmur-dev <command...>`
-
-If you’re running from a working tree without installing, use:
-
-`cargo run -p murmur --bin mm -- <command...>`
-
-### Output formats
-
-Murmur intentionally uses simple, script-friendly output:
-- Many `list` commands print tab-separated rows.
-- Many “action” commands print `ok` on success.
-- IDs are printed as a single line where possible (e.g., `issue create`, `agent create`).
-
-### Environment variables
-
-Common:
-- `MURMUR_DIR` — override base directory (socket/logs/projects/runtime)
-- `MURMUR_LOG` — log filter level (e.g., `info`, `debug`)
-
-Agent integration:
-- `MURMUR_AGENT_ID` — used by commands intended to be called by agents:
-  - `mm agent claim <issue-id>`
-  - `mm agent describe <text>`
-  - `mm agent done [--task ...] [--error ...]`
-  - `mm plan write` (uses agent id as plan id; strips `plan:` prefix)
-
-Backend auth:
-- GitHub: `GITHUB_TOKEN` or `GH_TOKEN` (or config `[providers.github].token`)
-- Linear: `LINEAR_API_KEY` (or config `[providers.linear].api-key`)
+Global Options:
+  --murmur-dir <PATH>    Override base directory (~/.murmur)
+  --log-level <LEVEL>    Set log level (error, warn, info, debug, trace)
+  -h, --help             Show help
+  -V, --version          Show version
+```
 
 ---
 
-## Command Overview
+## Server Commands
 
-Top-level groups (run `mm --help` for the full tree):
+### `mm server start`
 
-- `server` — daemon lifecycle (`start`, `stop`, `restart`, `status`)
-- `tui` — interactive terminal UI (see `docs/TUI.md`)
-- `project` — register/configure projects
-- `issue` — list/create/update/close/comment issues
-- `project start/stop` — start/stop per-project orchestration
-- `agent` — list/abort/plan/claim/describe/done
-- `claims` — claim inspection
-- `plan` — stored plan files (list/read/write)
-- `manager` — per-project manager agent
-- `attach` — stream daemon events to stdout
-- `branch cleanup` — remove merged `murmur/*` branches
-- `completion` — generate shell completion scripts
+Start the Murmur daemon.
 
-Hidden/internal (available for compatibility, but not listed in `--help`):
-- `orchestration` — orchestration control (use `project start/stop` instead)
-- `hook` — hook entrypoints used by `claude`
-- `permission` / `question` — approvals and AskUserQuestion helpers
-- `ping`, `stats`, `commit`, `claim` — debugging/admin utilities
+```bash
+mm server start [OPTIONS]
 
----
+Options:
+  --foreground    Run in foreground (don't daemonize)
+```
 
-## `server`
+**Examples:**
+```bash
+mm server start              # Start in background
+mm server start --foreground # Start in foreground (for development)
+```
 
-Foreground daemon:
+### `mm server stop`
 
-`mm server start --foreground`
+Stop the running daemon gracefully.
 
-Background daemon:
+```bash
+mm server stop
+```
 
-`mm server start`
+Alias: `mm server shutdown`
 
-Stop / restart:
+### `mm server status`
 
-- `mm server stop`
-- `mm server restart`
+Check if the daemon is running.
 
-Status:
+```bash
+mm server status
+```
 
-`mm server status`
+### `mm server restart`
 
-Notes:
-- `server stop` has alias `server shutdown`.
-- Background start currently “daemonizes” by spawning `server start --foreground` as a child process.
+Restart the daemon.
 
----
+```bash
+mm server restart [OPTIONS]
 
-## `project`
-
-Add a project:
-
-Preferred:
-
-`mm project add <path-or-url> [--name myproj] [--max-agents N] [--autostart] [--backend claude|codex]`
-
-Legacy-compatible:
-
-`mm project add myproj --remote-url <git-url> [--max-agents N] [--autostart] [--backend ...]`
-
-List:
-
-`mm project list`
-
-Remove:
-
-- `mm project remove myproj`
-- `mm project remove myproj --delete-worktrees`
-
-Config:
-
-- `mm project config show myproj`
-- `mm project config get myproj max-agents`
-- `mm project config set myproj max-agents 5`
-
-Status checks:
-
-`mm project status myproj`
-
-Start orchestration:
-
-- `mm project start myproj`
-- `mm project start --all`
-
-Stop orchestration:
-
-- `mm project stop myproj`
-- `mm project stop --all`
+Options:
+  --foreground    Run in foreground after restart
+```
 
 ---
 
-## `issue`
+## Project Commands
 
-All `issue` commands accept `--project myproj` (or `-p myproj`). If omitted, Murmur attempts to detect the project from the current working directory (repo or agent worktree).
+### `mm project add`
 
-List:
+Register a new project.
 
-`mm issue list --project myproj`
+```bash
+mm project add <PATH_OR_URL> [OPTIONS]
 
-Show:
+Arguments:
+  <PATH_OR_URL>    Git URL or local path to clone
 
-`mm issue show <issue-id> --project myproj`
+Options:
+  --name <NAME>         Project name (inferred from URL if omitted)
+  --max-agents <N>      Max concurrent agents (default: 3)
+  --autostart           Start orchestration when daemon starts
+  --backend <BACKEND>   Agent backend: claude, codex (default: claude)
+```
 
-Ready:
+**Examples:**
+```bash
+mm project add https://github.com/org/repo.git
+mm project add https://github.com/org/repo.git --name myproj
+mm project add git@github.com:org/repo.git --max-agents 5 --autostart
+```
 
-`mm issue ready --project myproj`
+### `mm project list`
 
-Create:
+List all registered projects.
 
-`mm issue create "Title" --project myproj [--description "..."] [--type task] [--priority 1] [--depends-on ISSUE-2] [--parent ISSUE-1] [--commit]`
+```bash
+mm project list
+```
 
-Update:
+Output format: tab-separated (script-friendly).
 
-`mm issue update <issue-id> --project myproj [--title ...] [--status open|blocked|closed] [--priority ...]`
+### `mm project remove`
 
-Close:
+Remove a project from the registry.
 
-`mm issue close <issue-id> --project myproj`
+```bash
+mm project remove <NAME> [OPTIONS]
 
-Comment:
+Options:
+  --delete-worktrees    Also delete agent worktrees
+```
 
-`mm issue comment <issue-id> --project myproj --body "comment body"`
+### `mm project status`
 
-Upsert plan section:
+Show project health and orchestration status.
 
-`mm issue plan <issue-id> --project myproj --file plan.md`
+```bash
+mm project status <NAME>
+```
 
-Commit tickets (`tk` only):
+### `mm project start`
 
-`mm issue commit --project myproj`
+Start orchestration for a project.
 
-Details: `docs/components/ISSUE_BACKENDS.md`.
+```bash
+mm project start <NAME>
+mm project start --all
+```
 
----
+### `mm project stop`
 
-## `agent`
+Stop orchestration for a project.
 
-Create a coding agent:
+```bash
+mm project stop <NAME>
+mm project stop --all
+```
 
-`mm agent create myproj <issue-id> [--backend claude|codex]`
+### `mm project config`
 
-List:
+View and modify project configuration.
 
-- `mm agent list`
-- `mm agent list --project myproj`
+```bash
+# Show all config
+mm project config show <NAME>
 
-Lifecycle:
+# Get a single value
+mm project config get <NAME> <KEY>
 
-- `mm agent abort <agent-id> [--force] [--yes]`
-- `mm agent done [--task <id>] [--error <text>]` (uses `MURMUR_AGENT_ID`)
+# Set a value
+mm project config set <NAME> <KEY> <VALUE>
+```
 
-Notes:
-- `agent create/delete/send-message/chat-history/tail` exist for internal use but are hidden from `--help`.
+**Configuration Keys:**
 
-Agent-to-daemon (used by agent processes):
+| Key | Values | Description |
+|-----|--------|-------------|
+| `max-agents` | 1-10 | Max concurrent coding agents |
+| `issue-backend` | `tk`, `github`, `linear` | Issue source |
+| `agent-backend` | `claude`, `codex` | AI backend |
+| `coding-backend` | `claude`, `codex` | Override for coding agents |
+| `planner-backend` | `claude`, `codex` | Override for planners |
+| `permissions-checker` | `manual`, `llm` | Permission handling mode |
+| `merge-strategy` | `direct`, `pull-request` | Merge mode |
+| `autostart` | `true`, `false` | Auto-start on daemon start |
+| `allowed-authors` | JSON array | Filter issues by author (GitHub) |
+| `linear-team` | UUID | Linear team ID |
+| `linear-project` | UUID | Linear project ID |
 
-- `mm agent claim <issue-id>` (requires `MURMUR_AGENT_ID`)
-- `mm agent describe <text>` (requires `MURMUR_AGENT_ID`)
-
-Planner alias:
-
-- Start: `mm agent plan --project myproj "prompt..."`
-- List: `mm agent plan list --project myproj`
-- Stop: `mm agent plan stop plan-1`
-
----
-
-## `plan` (stored plans)
-
-Stored plans live under `plans/<id>.md` in the base directory.
-
-List stored plans:
-
-`mm plan list`
-
-Show contents:
-
-`mm plan read plan-1`
-
-Write from stdin (uses `MURMUR_AGENT_ID`):
-
-`cat plan.md | MURMUR_AGENT_ID=plan:plan-1 mm plan write`
-
-Running planners are controlled via `agent plan ...` (see above).
-
----
-
-## `manager`
-
-Start/stop:
-
-- `mm manager start myproj`
-- `mm manager stop myproj`
-
-Interaction happens via the TUI.
-
-Status/clear:
-
-- `mm manager status myproj`
-- `mm manager clear myproj`
-
----
-
-## `permission` and `question` (hidden)
-
-These commands exist primarily for debugging/automation and are hidden from `--help`.
-
-Permissions:
-
-- List: `mm permission list`
-- Respond: `mm permission respond <request-id> allow|deny`
-
-Questions:
-
-- List: `mm question list`
-- Respond: `mm question respond <request-id> '{"q1":"answer"}'`
+**Examples:**
+```bash
+mm project config show myproj
+mm project config get myproj max-agents
+mm project config set myproj issue-backend github
+mm project config set myproj max-agents 5
+mm project config set myproj allowed-authors '["user1", "user2"]'
+```
 
 ---
 
-## `attach`
+## Issue Commands
 
-Stream daemon events to stdout until Ctrl-C:
+All issue commands support `--project <NAME>` (or `-p <NAME>`). If omitted, the project is inferred from the current working directory.
 
-- All projects: `mm attach`
-- Filtered: `mm attach myproj otherproj`
+### `mm issue list`
+
+List issues from the configured backend.
+
+```bash
+mm issue list --project <NAME>
+```
+
+### `mm issue show`
+
+Show details of a specific issue.
+
+```bash
+mm issue show <ISSUE_ID> --project <NAME>
+```
+
+### `mm issue ready`
+
+List issues that are ready to be worked on (open, no open dependencies).
+
+```bash
+mm issue ready --project <NAME>
+```
+
+### `mm issue create`
+
+Create a new issue (tk backend).
+
+```bash
+mm issue create <TITLE> --project <NAME> [OPTIONS]
+
+Options:
+  --description <TEXT>    Issue description
+  --type <TYPE>           Issue type (e.g., task, bug, feature)
+  --priority <N>          Priority (default: 0)
+  --depends-on <ID>       Add dependency on another issue
+  --parent <ID>           Set parent issue
+  --commit                Immediately commit the new ticket
+```
+
+**Examples:**
+```bash
+mm issue create "Add user authentication" -p myproj
+mm issue create "Fix login bug" -p myproj --type bug --priority 1
+mm issue create "Refactor API" -p myproj --description "Improve error handling"
+```
+
+### `mm issue update`
+
+Update an existing issue.
+
+```bash
+mm issue update <ISSUE_ID> --project <NAME> [OPTIONS]
+
+Options:
+  --title <TEXT>          New title
+  --status <STATUS>       open, blocked, closed
+  --priority <N>          New priority
+```
+
+### `mm issue close`
+
+Close an issue.
+
+```bash
+mm issue close <ISSUE_ID> --project <NAME>
+```
+
+### `mm issue comment`
+
+Add a comment to an issue.
+
+```bash
+mm issue comment <ISSUE_ID> --project <NAME> --body <TEXT>
+```
+
+### `mm issue plan`
+
+Upsert a `## Plan` section in the issue body.
+
+```bash
+mm issue plan <ISSUE_ID> --project <NAME> --file <PATH>
+mm issue plan <ISSUE_ID> --project <NAME> --body <TEXT>
+```
+
+### `mm issue commit`
+
+Commit and push ticket changes (tk backend only).
+
+```bash
+mm issue commit --project <NAME>
+```
 
 ---
 
-## `branch cleanup`
+## Agent Commands
 
-Clean up merged agent branches (prefix `murmur/`):
+### `mm agent list`
 
-- Dry run: `mm branch cleanup --dry-run`
-- Delete remote refs: `mm branch cleanup`
-- Also delete local refs: `mm branch cleanup --local`
+List all running agents.
+
+```bash
+mm agent list [OPTIONS]
+
+Options:
+  --project <NAME>    Filter by project
+```
+
+Output columns: ID, Project, Issue, State, Backend.
+
+### `mm agent create`
+
+Manually create a coding agent.
+
+```bash
+mm agent create <PROJECT> <ISSUE_ID> [OPTIONS]
+
+Options:
+  --backend <BACKEND>    claude, codex
+```
+
+### `mm agent abort`
+
+Stop an agent.
+
+```bash
+mm agent abort <AGENT_ID> [OPTIONS]
+
+Options:
+  --force    Force kill if graceful abort fails
+  --yes      Skip confirmation prompt
+```
+
+### `mm agent done`
+
+Signal agent completion (used by agent processes).
+
+```bash
+mm agent done [OPTIONS]
+
+Options:
+  --task <ID>      Task/issue ID (optional)
+  --error <TEXT>   Error message if failed
+
+Requires: MURMUR_AGENT_ID environment variable
+```
+
+### `mm agent claim`
+
+Claim an issue for the current agent (used by agent processes).
+
+```bash
+mm agent claim <ISSUE_ID>
+
+Requires: MURMUR_AGENT_ID environment variable
+```
+
+### `mm agent describe`
+
+Set a description for the current agent (used by agent processes).
+
+```bash
+mm agent describe <TEXT>
+
+Requires: MURMUR_AGENT_ID environment variable
+```
 
 ---
 
-## `hook` (internal)
+## Planner Commands
 
-These entrypoints are invoked by `claude` hooks:
+### `mm agent plan`
 
-- `mm hook PreToolUse`
-- `mm hook PermissionRequest` (legacy alias)
-- `mm hook Stop`
+Start a planner agent.
 
-You generally do not call these manually.
+```bash
+mm agent plan --project <NAME> <PROMPT>
+mm agent plan <PROMPT>    # Project-less planner
+```
 
-If you see hook execution issues due to a moved/unlinked daemon binary, set `FUGUE_HOOK_EXE` before starting the daemon. See `docs/components/HOOKS.md`.
+### `mm agent plan list`
+
+List running planners.
+
+```bash
+mm agent plan list --project <NAME>
+```
+
+### `mm agent plan stop`
+
+Stop a running planner.
+
+```bash
+mm agent plan stop <PLAN_ID>
+```
+
+### `mm plan list`
+
+List stored plan files.
+
+```bash
+mm plan list
+```
+
+### `mm plan read`
+
+Show contents of a stored plan.
+
+```bash
+mm plan read <PLAN_ID>
+```
+
+### `mm plan write`
+
+Write plan content from stdin (used by planner agents).
+
+```bash
+cat plan.md | mm plan write
+
+Requires: MURMUR_AGENT_ID environment variable
+```
+
+---
+
+## Manager Commands
+
+### `mm manager start`
+
+Start a manager agent for a project.
+
+```bash
+mm manager start <PROJECT>
+```
+
+### `mm manager stop`
+
+Stop the manager agent.
+
+```bash
+mm manager stop <PROJECT>
+```
+
+### `mm manager status`
+
+Check manager status.
+
+```bash
+mm manager status <PROJECT>
+```
+
+### `mm manager clear`
+
+Clear manager history.
+
+```bash
+mm manager clear <PROJECT>
+```
+
+---
+
+## Monitoring Commands
+
+### `mm tui`
+
+Launch the terminal UI.
+
+```bash
+mm tui
+```
+
+See [TUI.md](TUI.md) for keybindings and features.
+
+### `mm attach`
+
+Stream daemon events to stdout.
+
+```bash
+mm attach [PROJECTS...]
+```
+
+**Examples:**
+```bash
+mm attach           # All projects
+mm attach myproj    # Single project
+mm attach proj1 proj2
+```
+
+Press Ctrl-C to detach.
+
+### `mm claims`
+
+Show active issue claims.
+
+```bash
+mm claims [OPTIONS]
+
+Options:
+  --project <NAME>    Filter by project
+```
+
+---
+
+## Maintenance Commands
+
+### `mm branch cleanup`
+
+Delete merged `murmur/*` branches.
+
+```bash
+mm branch cleanup [OPTIONS]
+
+Options:
+  --dry-run    Show what would be deleted
+  --local      Also delete local branches
+```
+
+**Examples:**
+```bash
+mm branch cleanup --dry-run   # Preview
+mm branch cleanup             # Delete remote branches
+mm branch cleanup --local     # Delete local and remote
+```
+
+---
+
+## Hidden Commands
+
+These commands exist but are hidden from `--help`. They're primarily for internal use or debugging.
+
+### Permission Commands
+
+```bash
+mm permission list
+mm permission respond <REQUEST_ID> allow|deny
+```
+
+### Question Commands
+
+```bash
+mm question list
+mm question respond <REQUEST_ID> '{"key": "answer"}'
+```
+
+### Hook Commands
+
+Used by Claude Code hooks (not for manual invocation):
+
+```bash
+mm hook PreToolUse
+mm hook PermissionRequest
+mm hook Stop
+```
+
+### Debug Commands
+
+```bash
+mm ping                    # Check daemon connectivity
+mm stats                   # Usage statistics
+mm commit list             # List recent commits
+mm claim list              # Same as `mm claims`
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MURMUR_DIR` | Base directory for all state | `~/.murmur` |
+| `MURMUR_LOG` | Log level filter | `info` |
+| `MURMUR_AGENT_ID` | Agent ID (for agent commands) | — |
+| `GITHUB_TOKEN` | GitHub API token | — |
+| `GH_TOKEN` | GitHub API token (alternative) | — |
+| `LINEAR_API_KEY` | Linear API key | — |
+| `ANTHROPIC_API_KEY` | Anthropic API key | — |
+| `OPENAI_API_KEY` | OpenAI API key | — |
+| `FUGUE_HOOK_EXE` | Hook command executable path | — |
+
+---
+
+## Output Formats
+
+Murmur uses simple, script-friendly output:
+
+- **Lists**: Tab-separated rows
+- **Actions**: `ok` on success
+- **IDs**: Single line (e.g., `issue create` prints the new issue ID)
+- **Errors**: Actionable error messages to stderr
+
+---
+
+## Examples
+
+### Complete Workflow
+
+```bash
+# Start daemon
+mm server start
+
+# Add a project
+mm project add https://github.com/myorg/myapp.git --name myapp
+
+# Configure GitHub backend
+export GITHUB_TOKEN=ghp_...
+mm project config set myapp issue-backend github
+
+# Start orchestration
+mm project start myapp
+
+# Monitor with TUI
+mm tui
+```
+
+### Local Development
+
+```bash
+# Use isolated directory
+export MURMUR_DIR=/tmp/murmur-dev
+
+# Start daemon in foreground
+mm server start --foreground
+
+# In another terminal
+mm project add /path/to/local/repo --name test
+mm issue create "Test issue" -p test
+mm project start test
+mm attach test
+```
+
+### Scripting
+
+```bash
+#!/bin/bash
+# Wait for ready issues and print count
+
+project="myapp"
+count=$(mm issue ready -p "$project" | wc -l)
+echo "Ready issues: $count"
+
+# List agent IDs
+mm agent list --project "$project" | cut -f1
+```

@@ -108,7 +108,7 @@ pub async fn project_add(
         payload: serde_json::to_value(payload).context("serialize payload")?,
     };
 
-    let resp = request(paths, req).await?;
+    let resp = request_with_timeout(paths, req, Duration::from_secs(15 * 60)).await?;
     if !resp.success {
         return Err(anyhow!(resp
             .error
@@ -1039,7 +1039,7 @@ pub async fn manager_clear_history(paths: &MurmurPaths, project: String) -> anyh
 }
 
 pub async fn request(paths: &MurmurPaths, req: Request) -> anyhow::Result<Response> {
-    request_with_timeout(paths, req, Duration::from_secs(2)).await
+    request_with_timeout(paths, req, Duration::from_secs(30)).await
 }
 
 pub async fn request_with_timeout(
@@ -1048,6 +1048,7 @@ pub async fn request_with_timeout(
     read_timeout: Duration,
 ) -> anyhow::Result<Response> {
     let socket = paths.socket_path.clone();
+    let req_type = req.r#type.clone();
 
     let stream = tokio::time::timeout(Duration::from_secs(1), UnixStream::connect(&socket))
         .await
@@ -1062,12 +1063,21 @@ pub async fn request_with_timeout(
         .await
         .context("write request")?;
 
-    let resp: Response =
-        tokio::time::timeout(read_timeout, async { read_jsonl(&mut reader).await })
-            .await
-            .context("read timeout")?
+    let resp: Response = match tokio::time::timeout(read_timeout, async {
+        read_jsonl(&mut reader).await
+    })
+    .await
+    {
+        Ok(v) => v
             .context("read response")?
-            .ok_or_else(|| anyhow!("unexpected EOF reading response"))?;
+            .ok_or_else(|| anyhow!("unexpected EOF reading response"))?,
+        Err(_) => {
+            return Err(anyhow!(
+                    "read timeout waiting for daemon response (type={req_type}, timeout={}s). If this is a long-running operation (e.g. cloning a repo), the daemon may still be working.",
+                    read_timeout.as_secs()
+                ));
+        }
+    };
 
     Ok(resp)
 }

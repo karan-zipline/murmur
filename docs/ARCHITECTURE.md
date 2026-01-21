@@ -1,504 +1,503 @@
-# Murmur (Rust) — Architecture
+# Architecture
 
-Murmur is a local-only coding-agent supervisor. It manages multiple Claude Code or Codex CLI instances across multiple projects, isolates each agent in its own git worktree, assigns work from pluggable issue backends, and provides a CLI for monitoring + approvals.
+Murmur is a local-only coding-agent supervisor. It manages multiple Claude Code or Codex CLI instances across multiple projects, isolates each agent in its own git worktree, assigns work from pluggable issue backends, and provides a CLI for monitoring and approvals.
 
-This document is the architecture contract for Murmur. It describes the intended components, boundaries, protocols, on-disk layout, and runtime flows. Improvements and redesigns are explicitly out of scope for the initial implementation.
+This document describes the system design, component model, and key flows. For user-facing documentation, see [Usage Guide](USAGE.md) and [CLI Reference](CLI.md).
 
-If you’re looking for user docs rather than internals:
-- `docs/USAGE.md` (end-to-end)
-- `docs/CLI.md` (CLI reference)
+## Table of Contents
 
-If you want deeper internals, see `docs/components/` (daemon, IPC, worktrees, orchestration, backends, permissions).
-
----
-
-## 1) Goals
-
-**Local-only control plane**
-- Run a daemon on the local machine.
-- CLI connects via a Unix domain socket.
-- No remote / multi-machine mode.
-
-**Multi-project supervision**
-- Register multiple projects (by git remote URL).
-- Each project has per-project configuration (max agents, issue backend, merge strategy, backends, permissions checker).
-
-**Multi-agent orchestration**
-- A per-project orchestrator periodically polls for “ready” issues.
-- Spawns coding agents up to `max-agents`.
-- Agents operate in isolated git worktrees.
-
-**Issue backends**
-- `tk` (file-based) is the default (stored in-repo under `.murmur/tickets/`).
-- GitHub Issues backend.
-- Linear Issues backend (GraphQL API).
-
-**Agent lifecycle and completion**
-- Agents claim issues to avoid duplication.
-- Agents work, commit, close issues, and signal completion (`agent done`).
-- Orchestrator merges to the project default branch (direct merge strategy).
-
-**Interactive supervision**
-- Use the CLI to list agents, view chat history, and inspect recent work.
-- Use the CLI to approve/deny permissions and answer AskUserQuestion prompts.
-
-**Permission controls**
-- Rule-based allow/deny/pass (`permissions.toml`) for Claude Code tools via hooks.
-- Manual approvals via CLI when rules don’t decide.
-- Optional LLM-based authorization for permission decisions.
-
-**Planning + manager modes**
-- Planner agents for exploring/designing and writing a plan artifact.
-- Manager agents for project-scoped coordination (restricted command capabilities).
+- [Overview](#overview)
+- [Design Principles](#design-principles)
+- [System Architecture](#system-architecture)
+- [Component Model](#component-model)
+- [Crate Structure](#crate-structure)
+- [Data Flow](#data-flow)
+- [On-Disk Layout](#on-disk-layout)
+- [Key Runtime Flows](#key-runtime-flows)
 
 ---
 
-## 2) Non-Goals
+## Overview
 
-To keep the initial implementation focused, the following are explicitly out of scope:
+### Goals
 
-- **No “improvement roadmap” items** (persistence enhancements, recovery, refactors, new assignment strategy, worktree pooling, etc.).
-- **No remote service / HTTP API** for client control (local-only IPC).
-- **No guaranteed agent preservation across daemon restarts** (restart/recovery is best-effort only).
-- **No distributed scheduling** or cluster coordination.
-- **No new trackers** beyond `tk`, GitHub, Linear (Jira support is deferred).
+| Goal | Description |
+|------|-------------|
+| **Local-only control plane** | Daemon on local machine, CLI via Unix socket, no remote API |
+| **Multi-project supervision** | Register multiple projects, each with its own config |
+| **Multi-agent orchestration** | Per-project orchestrator spawns agents for ready issues |
+| **Pluggable issue backends** | `tk` (local files), GitHub Issues, Linear Issues |
+| **Git worktree isolation** | Each agent in its own worktree for safe concurrent work |
+| **Interactive supervision** | CLI/TUI for approvals, questions, and monitoring |
 
-We *do* still want clean module boundaries so improvements are possible later, but the initial implementation should match the baseline behavior first.
+### Non-Goals
 
----
+These are explicitly out of scope for the current implementation:
 
-## 3) Architecture Principles (Coding Style)
-
-These are mandatory design constraints for the Rust implementation.
-
-### Functional Core, Imperative Shell
-
-**Core**:
-- Pure functions over immutable values.
-- No filesystem, network, subprocess, sockets, time, randomness, or logging side effects.
-- Core returns **decisions and actions** as data (commands to execute), not effects.
-
-**Shell**:
-- Executes I/O (git, process spawning, socket server, HTTP calls, file reads/writes).
-- Translates between external protocols (JSON IPC, Claude/Codex JSONL) and core values.
-- Emits events and persists/updates runtime state.
-
-### High Cohesion, Low Coupling
-
-- Modules should have one job and a narrow surface area.
-- Dependencies flow from unstable/IO-heavy code **toward** stable/pure code (dependency inversion).
-- Use small traits at boundaries (“ports”).
-- Use DTOs at boundaries; avoid passing giant structs when only a field is needed.
-
-### Values over State / Decomplected Concerns
-
-- Represent domain state as values (`struct State { ... }`) and evolve via explicit events/commands.
-- Avoid global singletons.
-- Avoid mixing “what” with “when”: the core describes “what should happen”, the shell schedules/executes.
+- Remote/HTTP API for client control
+- Distributed scheduling or cluster coordination
+- Guaranteed agent preservation across daemon restarts
+- Additional issue trackers beyond tk, GitHub, Linear
 
 ---
 
-## 4) Process Topology (Runtime)
+## Design Principles
 
-Murmur runs as several cooperating local processes:
+Murmur follows **Functional Core, Imperative Shell** architecture.
 
-1. **Daemon** (`mm server start`)
-   - Owns long-lived state: registered projects, running orchestrators, agents, pending approvals.
-   - Exposes a Unix socket IPC API.
-   - Broadcasts streaming events to attached clients (`attach`).
+### Functional Core (`murmur-core`)
 
-2. **CLI** (`murmur ...`)
-   - Sends request/response messages to the daemon for almost all commands.
-   - Also provides hook commands invoked by Claude Code (permission hooks, idle notifications).
+- Pure functions over immutable values
+- **No I/O**: No filesystem, network, subprocess, sockets, time, randomness, or logging
+- Returns **decisions and actions** as data, not effects
+- Deterministic and easy to test
 
-3. **Agent processes** (spawned subprocesses)
-   - Coding agents: Claude Code CLI or Codex CLI, one per worktree.
-   - Planner agents: Claude/Codex in “plan mode” prompt.
-   - Manager agents: Claude/Codex with restricted capabilities (focuses on Claude-style restrictions).
+### Imperative Shell (`murmur`)
+
+- Executes all I/O (git, processes, sockets, HTTP, files)
+- Translates between external protocols and core values
+- Emits events and persists runtime state
+- Schedules and executes the core's decisions
+
+### Additional Principles
+
+| Principle | Description |
+|-----------|-------------|
+| **High cohesion, low coupling** | Modules have one job and narrow surface area |
+| **Dependency inversion** | I/O code depends on core, never the reverse |
+| **Values over state** | Domain state as values, evolved via explicit events |
+| **DTOs at boundaries** | Small data transfer objects, not giant structs |
+| **Traits at boundaries** | Minimal "port" interfaces for I/O adapters |
 
 ---
 
-## 5) On-Disk Layout
+## System Architecture
 
-Default base directory: `~/.murmur/` (override with `MURMUR_DIR`).
-
-Suggested layout:
+### Process Topology
 
 ```
-~/.murmur/
-  murmur.sock
-  murmur.pid
-  murmur.log
-  plans/
-    <id>.md
-  runtime/
-    agents.json        # best-effort metadata (not authoritative)
-    dedup.json         # webhook dedup store
-  projects/
-    <project>/
-      repo/            # git clone of remote
-      worktrees/
-        wt-<agentid>/
-        wt-plan-<planid>/
-        wt-manager/
-      permissions.toml # project-scoped rules (optional)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              LOCAL MACHINE                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│    ┌──────────────────────────────────────────────────────────────┐     │
+│    │                      MURMUR DAEMON                            │     │
+│    │                     (mm server start)                         │     │
+│    │  ┌────────────────────────────────────────────────────────┐  │     │
+│    │  │                    Shared State                         │  │     │
+│    │  │  • Project registry    • Claim registry                │  │     │
+│    │  │  • Agent runtimes      • Pending permissions           │  │     │
+│    │  │  • Orchestrators       • Commit logs                   │  │     │
+│    │  └────────────────────────────────────────────────────────┘  │     │
+│    │                              │                                │     │
+│    │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │     │
+│    │  │ Orchestrator│  │ Orchestrator│  │   Webhook Server    │  │     │
+│    │  │  (proj-a)   │  │  (proj-b)   │  │     (optional)      │  │     │
+│    │  └──────┬──────┘  └──────┬──────┘  └─────────────────────┘  │     │
+│    │         │                │                                    │     │
+│    │         ▼                ▼                                    │     │
+│    │  ┌─────────────────────────────────────────────────────────┐ │     │
+│    │  │                  AGENT PROCESSES                         │ │     │
+│    │  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐    │ │     │
+│    │  │  │ Agent   │  │ Agent   │  │ Planner │  │ Manager │    │ │     │
+│    │  │  │ (a-1)   │  │ (a-2)   │  │(plan-1) │  │(manager)│    │ │     │
+│    │  │  │ wt-a-1/ │  │ wt-a-2/ │  │wt-plan-1│  │wt-manager│    │ │     │
+│    │  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘    │ │     │
+│    │  └─────────────────────────────────────────────────────────┘ │     │
+│    └──────────────────────────────────────────────────────────────┘     │
+│                                    │                                     │
+│                         Unix Socket (IPC)                                │
+│                                    │                                     │
+│    ┌──────────────────────────────────────────────────────────────┐     │
+│    │              CLI (mm ...)  /  TUI (mm tui)                    │     │
+│    └──────────────────────────────────────────────────────────────┘     │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Config locations:
+### Component Roles
 
-- Global config: `~/.config/murmur/config.toml` (or `$MURMUR_DIR/config/config.toml`)
-- Global permissions: `~/.config/murmur/permissions.toml` (or `$MURMUR_DIR/config/permissions.toml`)
-
-`MURMUR_DIR` overrides base paths for local testing/isolation.
-
----
-
-## 6) Configuration Model
-
-### Global config (`config.toml`)
-
-Top-level concerns:
-- log level
-- provider API keys (anthropic/openai/github)
-- LLM auth settings (provider/model)
-- defaults for new projects
-- webhook server settings
-
-### Project config (`[[projects]]`)
-
-Each project stores:
-- `name`
-- `remote-url`
-- `max-agents`
-- `autostart`
-- `issue-backend`: `tk | github | gh | linear`
-- `permissions-checker`: `manual | llm`
-- `agent-backend` (fallback), plus `planner-backend`, `coding-backend`: `claude | codex`
-- `merge-strategy`: `direct | pull-request`
-- GitHub-specific fields (e.g., allowed authors list)
-- Linear-specific fields (e.g., `linear-team` required, `linear-project` optional)
-
-The daemon is the source of truth for the loaded config; CLI commands mutate config through daemon APIs (the daemon writes to `config.toml`).
+| Component | Responsibility |
+|-----------|----------------|
+| **Daemon** | Control plane: state, orchestration, event broadcast, IPC |
+| **CLI** | User commands via IPC; also invoked by agent hooks |
+| **TUI** | Real-time monitoring UI via attach event stream |
+| **Orchestrator** | Per-project loop: poll issues, spawn agents, track claims |
+| **Agent** | Claude Code or Codex subprocess in isolated worktree |
+| **Webhook Server** | Optional HTTP server for GitHub/Linear webhook triggers |
 
 ---
 
-## 7) Component Model (Conceptual)
+## Component Model
 
-### 7.1 Daemon / Supervisor (Control Plane)
+### Daemon (Supervisor)
 
-Responsibilities:
-- IPC request routing (single protocol surface)
-- project registry (load/save config)
-- orchestrator lifecycle (start/stop per project)
-- agent lifecycle (create/delete/abort/send message)
-- streaming events to clients (attach/detach + broadcast)
-- permission request coordination (pending set + response channels)
-- AskUserQuestion coordination
-- heartbeat monitoring (stuck agent detection)
-- webhook server (optional)
+The daemon owns:
 
-Non-responsibilities:
-- doesn’t implement git details (delegates to git/worktree adapter)
-- doesn’t implement issue backend logic (delegates to issue adapters)
-- doesn’t implement LLM parsing/protocol details (delegates to adapters)
+- **Project registry**: Load/save config, manage registered projects
+- **Orchestrator lifecycle**: Start/stop per-project spawn loops
+- **Agent lifecycle**: Create, delete, abort, send messages
+- **Claim registry**: Prevent duplicate work assignments
+- **Permission coordination**: Pending requests, response routing
+- **Event broadcast**: Stream events to attached clients
 
-### 7.2 Orchestrator (Per Project)
+The daemon delegates to adapters for:
+- Git operations (clone, worktree, merge)
+- Issue backend calls (tk, GitHub, Linear)
+- LLM parsing and protocol translation
 
-Responsibilities:
-- polling loop (default interval ~10s)
-- decides how many agents to spawn
-- merges/PRs on `agent done`
-- manages in-memory claim registry
-- tracks recent merged commits for UI (“recent work”)
+### Orchestrator
 
-### 7.3 Agents
+Each project has an orchestrator that:
 
-Three kinds:
-- **Coding agents**: claim tasks, implement code, commit, close issue, done.
-- **Planner agents**: explore + write plans into `plans/<id>.md`.
-- **Manager agent**: project-scoped coordinator; restricted commands.
+1. Polls for ready issues (~10 second interval)
+2. Filters by backend rules (status, authors)
+3. Skips already-claimed issues
+4. Spawns agents up to `max-agents`
+5. Claims issues on spawn
+6. Triggers merge on agent completion
 
-### 7.4 Issue backends
+### Agents
+
+Three agent types:
+
+| Type | Purpose | Worktree |
+|------|---------|----------|
+| **Coding** | Implement issues, commit, close | `wt-<agent-id>/` |
+| **Planner** | Explore, design, write plans | `wt-plan-<id>/` |
+| **Manager** | Interactive coordinator | `wt-manager/` |
+
+Agent state machine:
+
+```
+Starting → Running → Exited
+              │
+              ├─→ NeedsResolution (merge conflict)
+              │
+              └─→ Aborted (manual stop)
+```
+
+### Issue Backends
 
 Common interface:
 - `get(id)`, `list(filter)`, `ready()`
 - `create`, `update`, `close`
-- `comment`, `upsert_plan_section` where supported
-- `commit()` for `tk` (git add/commit/push), no-op for API backends
+- `comment`, `upsert_plan_section`
 
-Includes:
-- `tk`: files in `.murmur/tickets/` within the project repo clone
-- GitHub Issues (API-backed)
-- Linear Issues (API-backed)
+Implementations:
 
-For the canonical `.murmur/tickets/*.md` format, see `docs/TICKETS.md`.
+| Backend | Storage | Notes |
+|---------|---------|-------|
+| `tk` | `.murmur/tickets/*.md` | In-repo, commit via `issue commit` |
+| `github` | GitHub Issues API | Requires token, detects owner/repo from remote |
+| `linear` | Linear API | Requires API key and team UUID |
 
-#### GitHub backend (GraphQL API)
+### Permissions
 
-Murmur speaks to GitHub Issues via the GraphQL API.
+Claude Code integration via hooks:
 
-Requirements:
-- `owner/repo` is detected from the project repo’s `origin` remote URL (must be a GitHub remote).
-- Token is sourced from `[providers.github].token` (or `api-key`) or `GITHUB_TOKEN` / `GH_TOKEN`.
-- `allowed-authors` (optional): if empty, defaults to the repository owner; used to filter `ready()`.
-
-#### Linear backend (GraphQL API)
-
-Murmur speaks to Linear via the GraphQL API.
-
-Requirements:
-- API key is sourced from `[providers.linear].api-key` or `LINEAR_API_KEY`.
-- Per-project `linear-team` is required (team UUID) and `linear-project` is optional (project UUID).
-
-### 7.5 Permissions / Hooks
-
-Claude Code integration:
-- Claude invokes `mm hook PreToolUse` with JSON stdin.
-- Hook evaluates rules. If undecided, it asks the daemon and blocks for response.
-- Hook returns the decision JSON to Claude Code.
-
-Codex integration:
-- Codex uses built-in approval modes; Murmur cannot intercept tool execution.
- 
-### 7.6 TUI
-
-Murmur ships a single-screen TUI (`mm tui`) built on top of the daemon’s `attach` event stream. See `docs/TUI.md`.
-
----
-
-## 8) IPC Protocol (Daemon Socket)
-
-### Transport
-
-- Unix domain socket.
-- JSON envelope messages.
-- Streaming clients use a dedicated connection (separate socket connection) for live events.
-
-### Envelope
-
-All requests and responses use:
-
-```json
-{ "type": "project.list", "id": "req-123", "payload": { } }
+```
+Agent tool call → PreToolUse hook → mm hook PreToolUse
+                                           │
+                    ┌──────────────────────┴──────────────────────┐
+                    │                                             │
+              Rule match?                                   No match
+                    │                                             │
+           ┌───────┴───────┐                                     │
+           ↓               ↓                                     ↓
+         Allow           Deny                              Ask daemon
+           │               │                                     │
+           └───────────────┴─────────────────────────────────────┘
+                                           │
+                                           ↓
+                                    Return to Claude
 ```
 
-```json
-{ "type": "project.list", "id": "req-123", "success": true, "payload": { } }
+---
+
+## Crate Structure
+
+```
+crates/
+├── murmur-core/       # Functional core (pure logic)
+│   └── src/
+│       ├── agent.rs         # Agent state machine, chat buffer
+│       ├── claims.rs        # ClaimRegistry
+│       ├── config.rs        # Configuration structures
+│       ├── issue.rs         # Issue model, parsing, plan upsert
+│       ├── orchestration.rs # Pure spawn policy
+│       ├── permissions.rs   # Rule evaluation
+│       ├── paths.rs         # Path resolution
+│       └── stream/          # Agent output parsing
+│
+├── murmur-protocol/   # IPC message types
+│   └── src/lib.rs          # Request/Response/Event DTOs
+│
+└── murmur/            # Imperative shell (daemon + CLI)
+    └── src/
+        ├── main.rs          # CLI entrypoint
+        ├── client.rs        # IPC client
+        ├── daemon/
+        │   ├── mod.rs       # Daemon init
+        │   ├── server.rs    # Socket server
+        │   ├── state.rs     # SharedState
+        │   ├── orchestration.rs
+        │   ├── merge.rs
+        │   ├── claude.rs    # Claude subprocess
+        │   ├── webhook.rs
+        │   └── rpc/         # Message handlers
+        ├── git.rs           # Git operations
+        ├── worktrees.rs     # Worktree management
+        ├── github.rs        # GitHub API
+        ├── linear.rs        # Linear API
+        ├── issues.rs        # tk backend
+        ├── permissions.rs   # Rule loading
+        └── hooks.rs         # Claude hook handlers
 ```
 
-### Core message categories
+### Dependency Direction
 
-- server: `ping`, `shutdown`
-- orchestration: `start`, `stop`, `status`
-- projects: `project.add`, `project.remove`, `project.list`, `project.config.get/set/show`
-- agents: `agent.list`, `agent.create`, `agent.delete`, `agent.abort`, `agent.send_message`, `agent.chat_history`, `agent.describe`, `agent.done`, `agent.claim`, `agent.idle`
-- streaming: `attach`, `detach`
-- permissions: `permission.request/respond/list`
-- questions: `question.request/respond`
-- planner: `plan.start/stop/list/send_message/chat_history`
-- manager: `manager.start/stop/status/send_message/chat_history/clear_history`
-- stats: `stats`, `commit.list`, `claim.list`
+```
+murmur (shell)
+    │
+    ├──→ murmur-core (pure domain logic)
+    │
+    └──→ murmur-protocol (wire types)
 
-### Streaming events
-
-After `attach`, the daemon emits events like:
-- agent created/deleted/state/info
-- chat entries (assistant/user/tool)
-- permission requests and their pending state
-- user questions
-- planner events
-- manager events
-
-Event schema is “append-only messages” for the UI to consume; the UI keeps its own view-model state.
+murmur-core ←─┐
+              │ No dependencies on shell or I/O
+murmur-protocol ←┘
+```
 
 ---
 
-## 9) Agent Backends (Claude Code / Codex)
+## Data Flow
 
-### 9.1 Claude Code backend
+### IPC Protocol
 
-Characteristics:
-- Long-lived subprocess.
-- Multi-turn messages are written to stdin (JSONL).
-- Tool execution is interceptable via Claude hooks (permission system).
-- Output is `stream-json` JSONL; parse into a canonical internal `StreamMessage` representation.
+**Transport**: Unix domain socket (`murmur.sock`)
 
-Command shape (illustrative):
-- `claude --output-format stream-json --input-format stream-json --verbose ... --settings <json> --plugin-dir <dir>`
+**Message format**: JSONL (one JSON object per line)
 
-Hooks:
-- `PreToolUse` → permission interception
-- `Stop` → idle notification (daemon can resume kickstart after idle)
+**Request envelope**:
+```json
+{ "type": "project.list", "id": "req-123", "payload": {} }
+```
 
-### 9.2 Codex CLI backend
+**Response envelope**:
+```json
+{ "type": "project.list", "id": "req-123", "success": true, "payload": {} }
+```
 
-Characteristics:
-- Process-per-turn (resume via thread id).
-- Output is an event stream (JSONL) that must be converted to canonical `StreamMessage`.
-- No external permission hook interception (Codex approval is built-in).
+**Event envelope**:
+```json
+{ "type": "agent.chat", "id": "evt-42", "payload": { ... } }
+```
 
-Command shape (illustrative):
-- `codex exec --json --full-auto ... "<prompt>"`
-- `codex exec resume --json --full-auto <thread-id> "<prompt>"`
+### Message Categories
 
-Avoid attempting to fix upstream behavioral inconsistencies in this phase.
+| Category | Examples |
+|----------|----------|
+| Server | `ping`, `shutdown` |
+| Projects | `project.add`, `project.list`, `project.config.*` |
+| Orchestration | `orchestration.start`, `orchestration.stop` |
+| Agents | `agent.create`, `agent.list`, `agent.done` |
+| Issues | `issue.list`, `issue.ready`, `issue.create` |
+| Permissions | `permission.request`, `permission.respond` |
+| Plans | `plan.start`, `plan.stop`, `plan.list` |
+| Manager | `manager.start`, `manager.stop` |
 
----
+### Event Streaming
 
-## 10) Worktree & Merge Model
+After `attach`, the daemon pushes events:
 
-Each coding agent:
-- gets a dedicated worktree under `projects/<project>/worktrees/wt-<agentid>/`
-- works on a branch `murmur/<agentid>` (naming can be finalized later)
-
-On agent completion (`agent done`):
-- **direct** merge strategy:
-  - detect default branch (`origin/<default>`)
-  - rebase agent worktree on `origin/<default>`
-  - fast-forward merge into the default branch
-  - push `origin/<default>`
-  - on conflicts: agent remains running to resolve
-- **pull-request** strategy:
-  - reserved for later (config key exists; direct merge is implemented)
-
-The merge path is serialized to avoid concurrent merges stepping on each other.
+- `heartbeat` — Periodic health signal
+- `agent.chat` — Chat messages from agents
+- `permission.requested` — Tool approval needed
+- `question.requested` — User question pending
+- `agent.idle` — Agent waiting for input
 
 ---
 
-## 11) Key Runtime Flows
+## On-Disk Layout
 
-### 11.1 Daemon startup
+### Default Paths
 
-Shell:
-1. load config + registry
-2. ensure base dirs exist
-3. start IPC server
-4. start webhook server (if enabled)
-5. start orchestrators for `autostart` projects
+**Base directory**: `~/.murmur` (or `$MURMUR_DIR`)
 
-Core:
-- derives initial supervisor state from config.
+**Config directory**: `~/.config/murmur` (or `$MURMUR_DIR/config`)
 
-### 11.2 Add project
+### Directory Structure
 
-Shell:
-- persist registry entry
-- create `projects/<name>/`
-- `git clone <remote-url> projects/<name>/repo/`
+```
+~/.murmur/
+├── murmur.sock              # Unix domain socket (may be in XDG_RUNTIME_DIR)
+├── murmur.pid               # Daemon PID file
+├── murmur.log               # Structured logs
+│
+├── plans/
+│   └── plan-1.md            # Stored plan artifacts
+│
+├── runtime/
+│   ├── agents.json          # Agent metadata (best-effort)
+│   └── dedup.json           # Webhook deduplication
+│
+└── projects/
+    └── <project-name>/
+        ├── repo/            # Git clone of remote
+        ├── worktrees/
+        │   ├── wt-a-1/      # Coding agent worktree
+        │   ├── wt-plan-1/   # Planner worktree
+        │   └── wt-manager/  # Manager worktree
+        └── permissions.toml # Project-specific rules
 
-Core:
-- validates config values and returns “effects” to execute (clone, mkdir).
+~/.config/murmur/
+├── config.toml              # Global configuration
+└── permissions.toml         # Global permission rules
+```
 
-### 11.3 Orchestrator tick → spawn
+### Persistence Semantics
 
-Core:
-- input: current counts (active agents), ready issue count, claimed set.
-- output: `n_to_spawn`.
-
-Shell:
-- create worktree(s)
-- spawn agent subprocess(es)
-- send kickstart prompt
-
-### 11.4 Permission request (Claude)
-
-Shell:
-- hook parses stdin
-- evaluates rules
-- if undecided: IPC to daemon, await response
-- returns decision JSON to Claude
-
-Core:
-- rule evaluation is pure and deterministic
-
-### 11.5 Agent done → merge
-
-Shell:
-- execute merge strategy I/O
-- on success: stop/delete agent, release claims, update recent-work log
-
-Core:
-- decides state transitions + which side effects to run
+| File | Purpose | Durability |
+|------|---------|------------|
+| `config.toml` | Project registry, settings | Atomic writes |
+| `agents.json` | Agent metadata | Best-effort snapshot |
+| `dedup.json` | Webhook deduplication | Best-effort |
+| `murmur.log` | Daemon logs | Append-only |
 
 ---
 
-## 12) Rust Codebase Structure (Implemented)
+## Key Runtime Flows
 
-Murmur is a Cargo workspace with explicit “core vs shell” boundaries:
+### 1. Daemon Startup
 
-### `crates/murmur-core/` (functional core)
+```
+1. Resolve paths (MurmurPaths)
+2. Load config.toml
+3. Initialize SharedState
+4. Load persisted agent metadata (best-effort recovery)
+5. Bind Unix socket
+6. Start webhook server (if enabled)
+7. Start orchestrators for autostart projects
+8. Enter event loop
+```
 
-- Pure domain values and deterministic logic.
-- No Tokio runtime; no filesystem/network/subprocess/socket I/O.
-- Key modules:
-  - `agent.rs` — agent record state machine + chat buffer
-  - `issue.rs` — ticket parsing/formatting, `## Plan` upsert, ready computation
-  - `orchestration.rs` — pure spawn policy
-  - `permissions.rs` — rule evaluation for tool approvals
-  - `paths.rs` — deterministic path resolution (inputs passed in)
+### 2. Add Project
 
-### `crates/murmur-protocol/` (wire DTOs)
+```
+CLI: mm project add <url> --name myproj
+                    │
+                    ▼
+            IPC: project.add
+                    │
+                    ▼
+┌─────────────────────────────────────────┐
+│ Daemon:                                  │
+│  1. Validate config                      │
+│  2. git clone <url> → projects/myproj/repo/
+│  3. Create worktrees/ directory          │
+│  4. Add to config.toml                   │
+│  5. Return success                       │
+└─────────────────────────────────────────┘
+```
 
-- Serde request/response/event types + message constants.
-- Defines IPC payload schemas and event schemas.
+### 3. Orchestration Tick
 
-### `crates/murmur/` (imperative shell)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Every ~10 seconds (or on webhook trigger):                       │
+│                                                                  │
+│  1. Query ready issues from backend                              │
+│  2. Filter by backend rules (status, authors)                    │
+│  3. Filter out claimed issues                                    │
+│  4. Compute spawn plan (murmur-core)                            │
+│     → available = max_agents - active_agents                    │
+│     → spawn up to 'available' unclaimed issues                  │
+│  5. For each issue in plan:                                      │
+│     a. Create worktree                                           │
+│     b. Spawn agent process                                       │
+│     c. Record claim                                              │
+│     d. Send kickstart prompt                                     │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-- Tokio-based daemon + client + CLI.
-- Owns I/O and adapters:
-  - git and worktrees (`git.rs`, `worktrees.rs`)
-  - HTTP backends (`github.rs`, `linear.rs`)
-  - local tickets backend (`issues.rs`)
-  - daemon runtime (`daemon/`)
-  - CLI entrypoint (`src/main.rs`)
+### 4. Permission Request (Claude PreToolUse)
 
-Dependency direction:
-- `murmur` depends on `murmur-core` and `murmur-protocol`.
-- `murmur-core` and `murmur-protocol` are independent of the shell crate and avoid I/O.
+```
+Agent calls tool
+       │
+       ▼
+Claude invokes: mm hook PreToolUse
+       │
+       ▼
+┌─────────────────────────────────────────┐
+│ 1. Load rules (project + global)         │
+│ 2. Evaluate rules (pure)                 │
+│    → Match: return allow/deny            │
+│    → No match: continue                  │
+│ 3. Send permission.request to daemon     │
+│ 4. Block waiting for response            │
+│ 5. Return decision to Claude             │
+└─────────────────────────────────────────┘
+       │
+       ▼
+User approves/denies via TUI or CLI
+       │
+       ▼
+Daemon sends response, hook unblocks
+       │
+       ▼
+Claude proceeds or stops
+```
+
+### 5. Agent Done → Merge
+
+```
+Agent calls: mm agent done
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Daemon merge pipeline (direct strategy):                         │
+│                                                                  │
+│  1. Acquire project merge lock                                   │
+│  2. git fetch --prune origin                                     │
+│  3. Reset local default branch to origin/<default>               │
+│  4. Rebase agent worktree onto origin/<default>                  │
+│     → On conflict: mark agent "needs_resolution", stop           │
+│  5. Fast-forward merge murmur/<agent-id> into default branch    │
+│  6. git push origin <default>                                    │
+│  7. Close issue (via backend)                                    │
+│  8. Release claim                                                │
+│  9. Record commit in log                                         │
+│ 10. Remove worktree                                              │
+│ 11. Clean up agent runtime                                       │
+│ 12. Release merge lock                                           │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 13) “Ports and Adapters” Interfaces (Key Decoupling Points)
+## Further Reading
 
-To keep coupling low while still shipping quickly, define minimal traits (“ports”) for:
+### Component Deep Dives
 
-- `Clock` (shell supplies time; core consumes timestamps)
-- `IdGen` (shell supplies ids; core consumes values)
-- `Git` (worktree create/reset, merge/rebase/push)
-- `Process` (spawn/stop, stdin/stdout streaming)
-- `IssueBackend` (tk/github/linear)
-- `PermissionsDecider` (manual via daemon/CLI vs LLM)
-- `Storage` (config, plans, runtime metadata)
+- [Agents](components/AGENTS.md) — State machine, backends, chat history
+- [Orchestration](components/ORCHESTRATION.md) — Spawn policy, claims
+- [Issue Backends](components/ISSUE_BACKENDS.md) — tk, GitHub, Linear
+- [Permissions](components/PERMISSIONS_AND_QUESTIONS.md) — Rules, hooks
+- [Worktrees & Merge](components/WORKTREES_AND_MERGE.md) — Git isolation
+- [Daemon](components/DAEMON.md) — Internals, startup, state
+- [IPC](components/IPC.md) — Protocol specification
 
-The core should never depend on concrete implementations, only these traits or explicit DTO inputs.
+### Code Pointers
 
----
-
-## 14) Observability
-
-Requirements:
-- structured logs to file (daemon)
-- actionable error messages for CLI commands
-- enough event emission for `attach` consumers (and future UIs)
-
-Avoid adding new metrics systems or tracing pipelines; keep it simple and local.
-
----
-
-## 15) Release Checklist (What we must ship first)
-
-- Daemon IPC server + CLI client
-- Project registry + clone-on-add
-- Worktree creation per agent
-- Orchestrator polling + spawning
-- Issue backends: `tk` (`.murmur/tickets/`), GitHub Issues, Linear Issues
-- In-memory claim registry
-- Agent spawn + streaming parse + chat history buffer
-- `agent done` path + merge strategy “direct”
-- Claude hook command: PreToolUse + Stop idle
-- Permissions: global + project rules, manual approvals via CLI
-- Plan storage + planner agents
-- Manager agents with allowlisted commands (Claude settings allow-list)
-- Optional webhook server + dedup store
-
-Anything beyond this is explicitly out of scope for this phase.
+| Concern | Location |
+|---------|----------|
+| Agent state machine | `murmur-core/src/agent.rs` |
+| Spawn policy | `murmur-core/src/orchestration.rs` |
+| Rule evaluation | `murmur-core/src/permissions.rs` |
+| Daemon entry | `murmur/src/daemon/mod.rs` |
+| Socket server | `murmur/src/daemon/server.rs` |
+| Shared state | `murmur/src/daemon/state.rs` |
+| Merge pipeline | `murmur/src/daemon/merge.rs` |
+| Git operations | `murmur/src/git.rs` |
