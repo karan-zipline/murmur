@@ -39,12 +39,6 @@ cargo install --locked --path crates/fugue --force
 
 ## Quickstart (2 Terminals)
 
-Pick a base directory for Fugue’s local state (recommended for testing):
-
-```bash
-export FUGUE_DIR=/tmp/fugue-dev
-```
-
 Terminal A (daemon):
 
 ```bash
@@ -73,6 +67,23 @@ Optional: stream daemon events:
 
 ```bash
 fugue attach
+```
+
+## Using a Custom Base Directory (Optional)
+
+By default, Fugue stores its local state under `~/.fugue` and config under `~/.config/fugue`.
+
+If you want an isolated environment for testing, set `FUGUE_DIR` (or pass `--fugue-dir`):
+
+```bash
+export FUGUE_DIR=/tmp/fugue-dev
+fugue server start --foreground
+```
+
+Or:
+
+```bash
+fugue --fugue-dir /tmp/fugue-dev server start --foreground
 ```
 
 ## Issue Backends

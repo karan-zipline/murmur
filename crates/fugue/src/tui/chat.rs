@@ -529,7 +529,10 @@ mod tests {
 
         scroll_down(&mut buf, viewport_height, 100);
         assert!(buf.follow_tail);
-        assert_eq!(buf.scroll_top, max_scroll_top(buf.lines.len(), viewport_height));
+        assert_eq!(
+            buf.scroll_top,
+            max_scroll_top(buf.lines.len(), viewport_height)
+        );
     }
 
     #[test]

@@ -12,7 +12,9 @@ If you’re looking for end-to-end usage, start at `docs/USAGE.md`.
 
 ### Base directory (`FUGUE_DIR`)
 
-Most examples use `FUGUE_DIR=/tmp/fugue-dev` so everything is isolated:
+By default, Fugue stores runtime state under `~/.fugue` and config under `~/.config/fugue`.
+
+If you want an isolated environment (tests/demos/CI), set `FUGUE_DIR`:
 
 `FUGUE_DIR=/tmp/fugue-dev fugue <command...>`
 

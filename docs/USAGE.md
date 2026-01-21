@@ -63,15 +63,34 @@ From the repo root:
 
 Fugue is local-only and stores everything under a base directory.
 
-- Default base: `~/.fugue`
-- Override base (recommended for local testing): set `FUGUE_DIR=/tmp/fugue-dev` or use `--fugue-dir /tmp/fugue-dev`
+- Default base: `~/.fugue` (runtime state)
+- Default config: `~/.config/fugue` (config + permissions)
 
-With `FUGUE_DIR` set, Fugue keeps *both* runtime files and config under that directory:
-- `FUGUE_DIR/config/config.toml`
-- `FUGUE_DIR/config/permissions.toml`
-- `FUGUE_DIR/fugue.sock`, `FUGUE_DIR/fugue.log`, `FUGUE_DIR/projects/`, `FUGUE_DIR/plans/`, `FUGUE_DIR/runtime/`
+If you set `FUGUE_DIR` (or pass `--fugue-dir`), Fugue keeps *both* runtime files and config under that directory:
+- `<FUGUE_DIR>/config/config.toml`
+- `<FUGUE_DIR>/config/permissions.toml`
+- `<FUGUE_DIR>/fugue.sock`, `<FUGUE_DIR>/fugue.log`, `<FUGUE_DIR>/projects/`, `<FUGUE_DIR>/plans/`, `<FUGUE_DIR>/runtime/`
 
 Details: `docs/components/STORAGE.md`.
+
+---
+
+## Using a Custom Base Directory (Optional)
+
+The default base directory (`~/.fugue`) is fine for normal usage.
+
+If you want an isolated environment (recommended for tests, demos, and CI):
+
+```bash
+export FUGUE_DIR=/tmp/fugue-dev
+fugue server start --foreground
+```
+
+Or pass a one-off override:
+
+```bash
+fugue --fugue-dir /tmp/fugue-dev server start --foreground
+```
 
 ---
 
@@ -79,23 +98,23 @@ Details: `docs/components/STORAGE.md`.
 
 Foreground daemon (good for development):
 
-`FUGUE_DIR=/tmp/fugue-dev fugue server start --foreground`
+`fugue server start --foreground`
 
 Background start:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue server start`
+`fugue server start`
 
 Status / ping:
 
-- `FUGUE_DIR=/tmp/fugue-dev fugue server status`
+- `fugue server status`
 
 Stop:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue server stop`
+`fugue server stop`
 
 Restart:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue server restart`
+`fugue server restart`
 
 ---
 
@@ -105,28 +124,28 @@ Fugue registers projects by cloning a remote URL into the base directory.
 
 Recommended (path-or-url; name inferred unless overridden):
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project add <path-or-url> [--name myproj]`
+`fugue project add <path-or-url> [--name myproj]`
 
 Legacy-compatible form (explicit name + remote URL):
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project add myproj --remote-url <git-url>`
+`fugue project add myproj --remote-url <git-url>`
 
 List projects:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project list`
+`fugue project list`
 
 Inspect project config:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project config show myproj`
+`fugue project config show myproj`
 
 Project health checks (remote origin match, repo exists, orchestration running):
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project status myproj`
+`fugue project status myproj`
 
 Remove a project (unregisters; repo remains on disk):
 
-- Keep worktrees: `FUGUE_DIR=/tmp/fugue-dev fugue project remove myproj`
-- Delete worktrees: `FUGUE_DIR=/tmp/fugue-dev fugue project remove myproj --delete-worktrees`
+- Keep worktrees: `fugue project remove myproj`
+- Delete worktrees: `fugue project remove myproj --delete-worktrees`
 
 Component details:
 - `docs/components/CONFIG.md`
@@ -142,9 +161,9 @@ Each project has an `issue-backend` setting.
 
 Tickets live inside the project repo clone, under `.fugue/tickets/`.
 
-- Create: `FUGUE_DIR=/tmp/fugue-dev fugue issue create --project myproj "Title"`
-- List: `FUGUE_DIR=/tmp/fugue-dev fugue issue list --project myproj`
-- Ready: `FUGUE_DIR=/tmp/fugue-dev fugue issue ready --project myproj`
+- Create: `fugue issue create --project myproj "Title"`
+- List: `fugue issue list --project myproj`
+- Ready: `fugue issue ready --project myproj`
 
 Ticket format: `docs/TICKETS.md`.
 
@@ -158,7 +177,7 @@ Requirements:
 
 Enable:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project config set myproj issue-backend github`
+`fugue project config set myproj issue-backend github`
 
 ### Linear Issues
 
@@ -167,11 +186,11 @@ Requirements:
   - `LINEAR_API_KEY=...`
   - `[providers.linear].api-key = "..."`
 - A team id (UUID) on the project:
-  - `FUGUE_DIR=/tmp/fugue-dev fugue project config set myproj linear-team <team-uuid>`
+  - `fugue project config set myproj linear-team <team-uuid>`
 
 Enable:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project config set myproj issue-backend linear`
+`fugue project config set myproj issue-backend linear`
 
 Backend details: `docs/components/ISSUE_BACKENDS.md`.
 
@@ -181,20 +200,20 @@ Backend details: `docs/components/ISSUE_BACKENDS.md`.
 
 Start orchestration for a project:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project start myproj`
+`fugue project start myproj`
 
 Stop:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue project stop myproj`
+`fugue project stop myproj`
 
 All projects:
 
-- Start: `FUGUE_DIR=/tmp/fugue-dev fugue project start --all`
-- Stop: `FUGUE_DIR=/tmp/fugue-dev fugue project stop --all`
+- Start: `fugue project start --all`
+- Stop: `fugue project stop --all`
 
 Claims (what issue is assigned to which agent):
 
-`FUGUE_DIR=/tmp/fugue-dev fugue claims --project myproj`
+`fugue claims --project myproj`
 
 Orchestration details: `docs/components/ORCHESTRATION.md`.
 
@@ -204,20 +223,20 @@ Orchestration details: `docs/components/ORCHESTRATION.md`.
 
 List running agents:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue agent list`
+`fugue agent list`
 
 Filter by project:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue agent list --project myproj`
+`fugue agent list --project myproj`
 
 Abort:
 
-- `FUGUE_DIR=/tmp/fugue-dev fugue agent abort <agent-id>` (prompts)
-- `FUGUE_DIR=/tmp/fugue-dev fugue agent abort --yes <agent-id>` (no prompt)
+- `fugue agent abort <agent-id>` (prompts)
+- `fugue agent abort --yes <agent-id>` (no prompt)
 
 Mark done (used by agents; can also be invoked manually):
 
-`FUGUE_DIR=/tmp/fugue-dev FUGUE_AGENT_ID=<agent-id> fugue agent done`
+`FUGUE_AGENT_ID=<agent-id> fugue agent done`
 
 Agent internals: `docs/components/AGENTS.md`.
 
@@ -229,27 +248,27 @@ Planner agents are “plan mode” agents that produce markdown artifacts under 
 
 Start a planner:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue agent plan --project myproj "Plan the next sprint"`
+`fugue agent plan --project myproj "Plan the next sprint"`
 
 List running planners:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue agent plan list --project myproj`
+`fugue agent plan list --project myproj`
 
 Stop a planner:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue agent plan stop plan-1`
+`fugue agent plan stop plan-1`
 
 List stored plan files:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue plan list`
+`fugue plan list`
 
 Show stored plan contents:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue plan read plan-1`
+`fugue plan read plan-1`
 
 `plan write` is intended to be called by the planning agent (stdin → file). It uses `FUGUE_AGENT_ID` as the plan id:
 
-`cat myplan.md | FUGUE_DIR=/tmp/fugue-dev FUGUE_AGENT_ID=plan:plan-1 fugue plan write`
+`cat myplan.md | FUGUE_AGENT_ID=plan:plan-1 fugue plan write`
 
 Planner details: `docs/components/PLANNER_AND_MANAGER.md`.
 
@@ -261,22 +280,22 @@ Manager agents are project-scoped “interactive” agents (e.g., to ask questio
 
 Start:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue manager start myproj`
+`fugue manager start myproj`
 
 Status:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue manager status myproj`
+`fugue manager status myproj`
 
 Send message:
-Interact with the manager via the TUI: `FUGUE_DIR=/tmp/fugue-dev fugue tui`
+Interact with the manager via the TUI: `fugue tui`
 
 Stop:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue manager stop myproj`
+`fugue manager stop myproj`
 
 Clear manager state:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue manager clear myproj`
+`fugue manager clear myproj`
 
 ---
 
@@ -287,26 +306,26 @@ Fugue can also surface `AskUserQuestion` prompts as “questions”.
 
 Primary UI: use the TUI to review/respond:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue tui`
+`fugue tui`
 
 Hidden CLI fallback (not shown in `--help`):
 
 List pending permission requests:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue permission list`
+`fugue permission list`
 
 Respond:
 
-- Allow: `FUGUE_DIR=/tmp/fugue-dev fugue permission respond <request-id> allow`
-- Deny: `FUGUE_DIR=/tmp/fugue-dev fugue permission respond <request-id> deny`
+- Allow: `fugue permission respond <request-id> allow`
+- Deny: `fugue permission respond <request-id> deny`
 
 List pending user questions:
 
-`FUGUE_DIR=/tmp/fugue-dev fugue question list`
+`fugue question list`
 
 Respond (answers must be a JSON object of question-key to response text):
 
-`FUGUE_DIR=/tmp/fugue-dev fugue question respond <request-id> '{"q1":"answer"}'`
+`fugue question respond <request-id> '{"q1":"answer"}'`
 
 Permissions internals: `docs/components/PERMISSIONS_AND_QUESTIONS.md`.
 
@@ -316,8 +335,8 @@ Permissions internals: `docs/components/PERMISSIONS_AND_QUESTIONS.md`.
 
 Stream live events to stdout (Ctrl-C detaches):
 
-- All projects: `FUGUE_DIR=/tmp/fugue-dev fugue attach`
-- Filtered: `FUGUE_DIR=/tmp/fugue-dev fugue attach myproj`
+- All projects: `fugue attach`
+- Filtered: `fugue attach myproj`
 
 Protocol: `docs/components/IPC.md`.
 
