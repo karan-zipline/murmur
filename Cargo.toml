@@ -1,0 +1,8 @@
+[workspace]
+members = [
+  "crates/fugue",
+  "crates/fugue-core",
+  "crates/fugue-protocol",
+]
+resolver = "2"
+

@@ -1,0 +1,93 @@
+# Configuration (`config.toml`)
+
+Fugue reads global configuration from `config.toml`.
+
+Paths:
+- Default: `~/.config/fugue/config.toml`
+- If `FUGUE_DIR` is set: `$FUGUE_DIR/config/config.toml`
+
+Code pointers:
+- Schema + validation: `crates/fugue-core/src/config.rs`
+- Load/save: `crates/fugue/src/config_store.rs`
+- CLI mutations: `crates/fugue/src/main.rs` (`project config ...`)
+
+---
+
+## Global Settings
+
+### Log level
+
+CLI flag: `--log-level <LEVEL>` (also via env `FUGUE_LOG`)
+
+### Providers
+
+Providers are stored as TOML tables under `[providers.*]`.
+The daemon also supports environment variable fallbacks for common credentials.
+
+GitHub:
+- Config: `[providers.github].token` or `[providers.github].api-key`
+- Env: `GITHUB_TOKEN` or `GH_TOKEN`
+
+Linear:
+- Config: `[providers.linear].api-key`
+- Env: `LINEAR_API_KEY`
+
+Anthropic (LLM auth):
+- Config: `[providers.anthropic].api-key`
+- Env: `ANTHROPIC_API_KEY`
+- Optional endpoint override: `ANTHROPIC_API_URL`
+
+OpenAI (LLM auth):
+- Config: `[providers.openai].api-key`
+- Env: `OPENAI_API_KEY`
+- Optional endpoint override: `OPENAI_API_URL`
+
+### LLM authorization
+
+When a project uses `permissions-checker = "llm"`, Fugue uses `[llm_auth]` to decide tool permissions automatically. In LLM mode, Fugue is fail-closed: if authorization fails or the model is unsure, the request is denied (no manual fallback).
+
+```toml
+[llm_auth]
+provider = "anthropic" # or "openai"
+model = "claude-haiku-4-5"
+```
+
+---
+
+## Webhook Settings
+
+Optional:
+
+```toml
+[webhook]
+enabled = true
+bind-addr = "127.0.0.1:8080"
+path-prefix = "/webhooks"
+secret = "shared-secret"
+```
+
+See `docs/components/WEBHOOKS.md`.
+
+---
+
+## Projects (`[[projects]]`)
+
+Each project stores:
+- `name` — project identifier
+- `remote-url` — git remote URL to clone
+- `max-agents` — max concurrent coding agents (default `3`)
+- `autostart` — start orchestration on daemon startup
+- `issue-backend` — `tk | github | gh | linear`
+- `permissions-checker` — `manual | llm`
+- `agent-backend` — `claude | codex` (fallback)
+- `planner-backend` / `coding-backend` — optional overrides (fallback to `agent-backend`)
+- `allowed-authors` — used by backends that support author filtering (notably GitHub)
+- `linear-team` (required for Linear), `linear-project` (optional)
+- `merge-strategy` — `direct | pull-request`
+
+You can inspect and edit via:
+- `fugue project config show <project>`
+- `fugue project config get <project> <key>`
+- `fugue project config set <project> <key> <value>`
+
+Validation rules are enforced by `fugue-core` (`ConfigFile::validate`).

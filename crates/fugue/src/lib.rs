@@ -1,0 +1,17 @@
+pub mod client;
+pub mod config_store;
+pub mod daemon;
+pub mod dedup_store;
+pub mod git;
+pub mod github;
+pub mod hooks;
+pub mod ipc;
+pub mod issues;
+pub mod linear;
+pub mod llm_auth;
+pub mod permissions;
+pub mod providers;
+pub mod runtime_store;
+pub mod stats;
+pub mod tui;
+pub mod worktrees;

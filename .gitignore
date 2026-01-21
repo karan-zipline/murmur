@@ -1,0 +1,36 @@
+# --- Rust / Cargo ---
+/target/
+**/*.rlib
+**/*.rmeta
+**/*.dSYM/
+
+# --- Fugue runtime / local state ---
+.fugue/
+fugue.sock
+fugue.log
+**/*.sock
+**/*.pid
+**/*.log
+
+# --- Env / secrets ---
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# --- Editors / OS ---
+**/*.swp
+**/*.swo
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.fleet/
+
+# --- Coverage / profiling ---
+coverage/
+lcov.info
+tarpaulin-report.html
+*.profraw
+*.profdata
