@@ -48,7 +48,7 @@ You should see:
 
 ```
 Murmur daemon starting...
-Listening on /run/user/1000/murmur.sock
+Listening on ~/.murmur/murmur.sock
 ```
 
 Keep this terminal open. The daemon is the control plane for all Murmur operations.

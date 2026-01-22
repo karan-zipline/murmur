@@ -258,6 +258,12 @@ mm project stop myproj
 mm project stop --all
 ```
 
+By default, stopping orchestration does **not** abort running agents. To abort active coding agents:
+
+```bash
+mm project stop myproj --abort-agents
+```
+
 ### How It Works
 
 The orchestrator runs a loop (approximately every 10 seconds):
@@ -288,6 +294,8 @@ mm project config set myproj autostart true
 ## Working with Agents
 
 Agents are AI coding assistants (Claude Code or Codex) working in isolated git worktrees.
+
+**Codex note:** Codex CLI’s `workspace-write` sandbox disables network access by default, and that also blocks Unix domain socket connections (used by Murmur’s daemon IPC). Murmur spawns Codex agents with `sandbox_workspace_write.network_access=true` so agent-run `mm` commands (claim/done/etc.) can reach the daemon.
 
 ### Listing Agents
 
@@ -696,6 +704,7 @@ autostart = true
 | Variable | Description |
 |----------|-------------|
 | `MURMUR_DIR` | Override base directory (default: `~/.murmur`) |
+| `MURMUR_SOCKET_PATH` | Override daemon socket path |
 | `MURMUR_LOG` | Log level filter (e.g., `debug`, `info`) |
 | `MURMUR_AGENT_ID` | Used by agent commands (`claim`, `done`, etc.) |
 | `GITHUB_TOKEN` / `GH_TOKEN` | GitHub API token |

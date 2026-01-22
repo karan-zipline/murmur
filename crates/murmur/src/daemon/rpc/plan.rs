@@ -122,7 +122,7 @@ pub(in crate::daemon) async fn handle_plan_start(
             &plan_id,
             &project,
             &wt.dir,
-            &shared.paths.murmur_dir,
+            &shared.paths.socket_path,
             None,
             false,
             None,

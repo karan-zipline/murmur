@@ -336,7 +336,7 @@ After `attach`, the daemon pushes events:
 
 ```
 ~/.murmur/
-├── murmur.sock              # Unix domain socket (may be in XDG_RUNTIME_DIR)
+├── murmur.sock              # Unix domain socket
 ├── murmur.pid               # Daemon PID file
 ├── murmur.log               # Structured logs
 │

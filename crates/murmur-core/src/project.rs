@@ -36,6 +36,7 @@ mod tests {
             xdg_config_home: Some(tmp.path().join("xdg")),
             xdg_runtime_dir: Some(tmp.path().join("run")),
             murmur_dir_override: Some(tmp.path().join("murmur")),
+            socket_path_override: None,
         })
     }
 

@@ -8,6 +8,7 @@ pub struct PathInputs {
     pub xdg_config_home: Option<PathBuf>,
     pub xdg_runtime_dir: Option<PathBuf>,
     pub murmur_dir_override: Option<PathBuf>,
+    pub socket_path_override: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,10 +42,10 @@ pub fn compute_paths(inputs: PathInputs) -> MurmurPaths {
             .join("murmur"),
     };
 
-    let socket_path = if inputs.murmur_dir_override.is_some() {
-        murmur_dir.join("murmur.sock")
-    } else if let Some(runtime) = inputs.xdg_runtime_dir.as_ref() {
-        runtime.join("murmur.sock")
+    // Match fab's behavior: keep the socket under the base directory by default.
+    // This avoids surprises when XDG_RUNTIME_DIR points somewhere ephemeral.
+    let socket_path = if let Some(socket_path_override) = inputs.socket_path_override {
+        socket_path_override
     } else {
         murmur_dir.join("murmur.sock")
     };
@@ -108,6 +109,7 @@ mod tests {
             xdg_config_home: None,
             xdg_runtime_dir: None,
             murmur_dir_override: None,
+            socket_path_override: None,
         };
 
         let got = compute_paths(inputs);
@@ -134,6 +136,7 @@ mod tests {
             xdg_config_home: Some(PathBuf::from("/tmp/xdg")),
             xdg_runtime_dir: None,
             murmur_dir_override: None,
+            socket_path_override: None,
         };
 
         let got = compute_paths(inputs);
@@ -141,16 +144,20 @@ mod tests {
     }
 
     #[test]
-    fn compute_paths_uses_xdg_runtime_dir_for_socket_by_default() {
+    fn compute_paths_ignores_xdg_runtime_dir_for_socket_by_default() {
         let inputs = PathInputs {
             home_dir: PathBuf::from("/home/alice"),
             xdg_config_home: None,
             xdg_runtime_dir: Some(PathBuf::from("/run/user/123")),
             murmur_dir_override: None,
+            socket_path_override: None,
         };
 
         let got = compute_paths(inputs);
-        assert_eq!(got.socket_path, PathBuf::from("/run/user/123/murmur.sock"));
+        assert_eq!(
+            got.socket_path,
+            PathBuf::from("/home/alice/.murmur/murmur.sock")
+        );
         assert_eq!(got.murmur_dir, PathBuf::from("/home/alice/.murmur"));
     }
 
@@ -161,6 +168,7 @@ mod tests {
             xdg_config_home: Some(PathBuf::from("/tmp/xdg")),
             xdg_runtime_dir: Some(PathBuf::from("/run/user/123")),
             murmur_dir_override: Some(PathBuf::from("/tmp/murmur-dev")),
+            socket_path_override: None,
         };
 
         let got = compute_paths(inputs);

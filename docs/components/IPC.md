@@ -1,7 +1,7 @@
 # IPC Protocol (Unix Socket + JSONL)
 
 Murmur uses a local-only IPC protocol:
-- Transport: Unix domain socket (`murmur.sock`). By default, the socket is placed in `XDG_RUNTIME_DIR` when available; when `MURMUR_DIR` is set, the socket is placed under `$MURMUR_DIR/murmur.sock`.
+- Transport: Unix domain socket (`murmur.sock`). By default, the socket is placed under `~/.murmur/murmur.sock` (or `$MURMUR_DIR/murmur.sock` when `MURMUR_DIR` is set). When `MURMUR_SOCKET_PATH` is set, it overrides the socket path.
 - Framing: JSONL (one JSON object per line)
 - Message types: request/response + out-of-band events
 

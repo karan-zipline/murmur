@@ -232,7 +232,7 @@ MURMUR_LOG=debug mm server start --foreground
 ### IPC Inspection
 
 The daemon socket is at:
-- `$XDG_RUNTIME_DIR/murmur.sock` (default)
+- `~/.murmur/murmur.sock` (default)
 - `$MURMUR_DIR/murmur.sock` (if MURMUR_DIR set)
 
 ## Release Checklist

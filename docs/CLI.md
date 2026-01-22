@@ -27,6 +27,7 @@ mm [OPTIONS] <COMMAND> [ARGS]
 
 Global Options:
   --murmur-dir <PATH>    Override base directory (~/.murmur)
+  --socket-path <PATH>   Override daemon socket path
   --log-level <LEVEL>    Set log level (error, warn, info, debug, trace)
   -h, --help             Show help
   -V, --version          Show version
@@ -156,6 +157,9 @@ Stop orchestration for a project.
 mm project stop <NAME>
 mm project stop --all
 ```
+
+Options:
+  --abort-agents    Also abort active coding agents
 
 ### `mm project config`
 
@@ -572,6 +576,7 @@ mm claim list              # Same as `mm claims`
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MURMUR_DIR` | Base directory for all state | `~/.murmur` |
+| `MURMUR_SOCKET_PATH` | Override daemon socket path | — |
 | `MURMUR_LOG` | Log level filter | `info` |
 | `MURMUR_AGENT_ID` | Agent ID (for agent commands) | — |
 | `GITHUB_TOKEN` | GitHub API token | — |

@@ -46,7 +46,7 @@ The daemon does *not* implement business rules as side-effecting code:
    - Check if agent processes are still running (via `/proc/<pid>`).
    - Restore agent runtime entries so that `mm agent claim` and `mm agent done` work for agents from previous daemon sessions.
    - Agents with dead processes are marked as `Exited`.
-5. Start the Unix socket server (`murmur.sock`). By default, the socket is placed in `XDG_RUNTIME_DIR` when available; when `MURMUR_DIR` is set, it is placed under `$MURMUR_DIR/murmur.sock`.
+5. Start the Unix socket server (`murmur.sock`). By default, the socket is placed under `~/.murmur/murmur.sock` (or `$MURMUR_DIR/murmur.sock` when `MURMUR_DIR` is set). When `MURMUR_SOCKET_PATH` is set, it overrides the socket path.
 6. Start webhook server if enabled.
 7. Autostart orchestrators for projects with `autostart = true`.
 

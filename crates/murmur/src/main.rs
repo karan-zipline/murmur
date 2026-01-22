@@ -10,9 +10,8 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use directories::BaseDirs;
 use murmur::ipc::jsonl::{read_jsonl, write_jsonl};
-use murmur::{client, config_store, daemon};
+use murmur::{client, daemon};
 use murmur_core::agent::{ChatMessage, ChatRole};
-use murmur_core::config::{ConfigFile, IssueBackend};
 use murmur_core::paths::{compute_paths, MurmurPaths, PathInputs};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
@@ -26,6 +25,9 @@ use tracing_subscriber::EnvFilter;
 struct Cli {
     #[arg(long, global = true, value_name = "DIR", env = "MURMUR_DIR")]
     murmur_dir: Option<PathBuf>,
+
+    #[arg(long, global = true, value_name = "PATH", env = "MURMUR_SOCKET_PATH")]
+    socket_path: Option<PathBuf>,
 
     #[arg(long, global = true, env = "MURMUR_LOG", value_name = "LEVEL")]
     log_level: Option<String>,
@@ -178,6 +180,8 @@ enum ProjectCommand {
         project: Option<String>,
         #[arg(short = 'a', long)]
         all: bool,
+        #[arg(long, alias = "stop-agents")]
+        abort_agents: bool,
     },
     Status {
         name: String,
@@ -603,7 +607,7 @@ async fn main() -> ExitCode {
 
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let paths = resolve_paths(cli.murmur_dir.as_ref())?;
+    let paths = resolve_paths(cli.murmur_dir.as_ref(), cli.socket_path.as_ref())?;
     let enable_stderr_logging = !matches!(cli.command, Command::Tui);
     init_logging(&paths, cli.log_level.as_deref(), enable_stderr_logging)?;
 
@@ -612,7 +616,10 @@ async fn run() -> anyhow::Result<()> {
     dispatch(cli.command, &paths).await
 }
 
-fn resolve_paths(murmur_dir_override: Option<&PathBuf>) -> anyhow::Result<MurmurPaths> {
+fn resolve_paths(
+    murmur_dir_override: Option<&PathBuf>,
+    socket_path_override: Option<&PathBuf>,
+) -> anyhow::Result<MurmurPaths> {
     let base_dirs = BaseDirs::new().ok_or_else(|| anyhow!("could not determine home directory"))?;
     let home_dir = base_dirs.home_dir().to_path_buf();
 
@@ -627,11 +634,16 @@ fn resolve_paths(murmur_dir_override: Option<&PathBuf>) -> anyhow::Result<Murmur
         .cloned()
         .or_else(|| env::var_os("MURMUR_DIR").map(PathBuf::from));
 
+    let socket_path_override = socket_path_override
+        .cloned()
+        .or_else(|| env::var_os("MURMUR_SOCKET_PATH").map(PathBuf::from));
+
     Ok(compute_paths(PathInputs {
         home_dir,
         xdg_config_home,
         xdg_runtime_dir,
         murmur_dir_override,
+        socket_path_override,
     }))
 }
 
@@ -1061,7 +1073,11 @@ async fn dispatch_project(command: ProjectCommand, paths: &MurmurPaths) -> anyho
             println!("ok");
             Ok(())
         }
-        ProjectCommand::Stop { project, all } => {
+        ProjectCommand::Stop {
+            project,
+            all,
+            abort_agents,
+        } => {
             if project.is_none() && !all {
                 return Err(anyhow!("specify a project name or use --all"));
             }
@@ -1078,6 +1094,11 @@ async fn dispatch_project(command: ProjectCommand, paths: &MurmurPaths) -> anyho
 
             for project in &projects {
                 let _ = client::orchestration_stop(paths, project.to_owned()).await;
+            }
+
+            if !abort_agents {
+                println!("ok");
+                return Ok(());
             }
 
             let resp = client::agent_list(paths).await?;
@@ -1669,11 +1690,7 @@ fn run_git_quiet(repo_dir: &std::path::Path, args: &[&str]) -> anyhow::Result<()
 }
 
 async fn dispatch_issue(args: IssueArgs, paths: &MurmurPaths) -> anyhow::Result<()> {
-    let config = config_store::load(paths).await?;
-    let project = resolve_issue_project(paths, &config, args.project.as_deref())?;
-    let project_config = config
-        .project(&project)
-        .ok_or_else(|| anyhow!("get project: project not found"))?;
+    let project = resolve_issue_project(paths, args.project.as_deref()).await?;
 
     match args.command {
         IssueCommand::List { status } => {
@@ -1734,11 +1751,16 @@ async fn dispatch_issue(args: IssueArgs, paths: &MurmurPaths) -> anyhow::Result<
             let parent = parent
                 .map(|s| s.trim().to_owned())
                 .filter(|s| !s.is_empty());
+            let is_tk_backend = if commit || parent.is_some() {
+                project_issue_backend_is_tk(paths, &project).await?
+            } else {
+                false
+            };
             if let Some(ref parent) = parent {
                 match client::issue_get(paths, project.clone(), parent.clone()).await {
                     Ok(_) => {}
                     Err(err) => {
-                        if project_config.issue_backend == IssueBackend::Tk {
+                        if is_tk_backend {
                             return Err(err).context("validate --parent");
                         }
                     }
@@ -1765,7 +1787,7 @@ async fn dispatch_issue(args: IssueArgs, paths: &MurmurPaths) -> anyhow::Result<
             let resp = client::issue_create(paths, req).await?;
 
             if commit {
-                if project_config.issue_backend != IssueBackend::Tk {
+                if !is_tk_backend {
                     return Err(anyhow!("--commit is only supported for tk issues"));
                 }
                 client::issue_commit(paths, project).await?;
@@ -1870,28 +1892,66 @@ async fn dispatch_issue(args: IssueArgs, paths: &MurmurPaths) -> anyhow::Result<
     }
 }
 
-fn resolve_issue_project(
+async fn resolve_issue_project(
     paths: &MurmurPaths,
-    config: &ConfigFile,
     project_override: Option<&str>,
 ) -> anyhow::Result<String> {
-    if let Some(project) = project_override {
-        let trimmed = project.trim();
-        if trimmed.is_empty() || config.project(trimmed).is_none() {
-            return Err(anyhow!("get project: project not found"));
+    if let Some(project) = project_override.map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(project.to_owned());
+    }
+
+    if let Ok(project) = env::var("MURMUR_PROJECT") {
+        let project = project.trim();
+        if !project.is_empty() {
+            return Ok(project.to_owned());
         }
-        return Ok(trimmed.to_owned());
     }
 
     let cwd = env::current_dir().context("get cwd")?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);
-    if let Some(project) = murmur_core::project::detect_project_from_cwd(paths, config, &cwd) {
+
+    let resp = client::project_list(paths).await?;
+    let mut best: Option<(usize, String)> = None;
+    for p in resp.projects {
+        let repo_dir = std::path::PathBuf::from(&p.repo_dir);
+        let Some(project_dir) = repo_dir.parent() else {
+            continue;
+        };
+        if !cwd.starts_with(project_dir) {
+            continue;
+        }
+
+        let depth = project_dir.components().count();
+        let replace = match best.as_ref() {
+            Some((best_depth, _)) => depth > *best_depth,
+            None => true,
+        };
+        if replace {
+            best = Some((depth, p.name));
+        }
+    }
+
+    if let Some((_, project)) = best {
         return Ok(project);
     }
 
     Err(anyhow!(
-        "could not determine project: not in a registered project directory\nUse --project flag or run from a project directory"
+        "could not determine project: not in a registered project directory\nUse --project flag or set MURMUR_PROJECT"
     ))
+}
+
+async fn project_issue_backend_is_tk(paths: &MurmurPaths, project: &str) -> anyhow::Result<bool> {
+    let resp = client::project_config_get(
+        paths,
+        project.trim().to_owned(),
+        "issue-backend".to_owned(),
+    )
+    .await?;
+
+    Ok(resp
+        .value
+        .as_str()
+        .is_some_and(|s| s.trim().eq_ignore_ascii_case("tk")))
 }
 
 fn read_stdin_string() -> anyhow::Result<String> {
@@ -2103,6 +2163,13 @@ async fn server_start(foreground: bool, paths: &MurmurPaths) -> anyhow::Result<(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+
+    // Ensure the spawned foreground daemon uses the same socket path as this process, even when
+    // the caller used CLI flags instead of env vars.
+    cmd.env("MURMUR_SOCKET_PATH", &paths.socket_path);
+    if paths.config_dir == paths.murmur_dir.join("config") {
+        cmd.env("MURMUR_DIR", &paths.murmur_dir);
+    }
 
     let child = cmd.spawn().context("spawn daemon")?;
     let pid = child.id();

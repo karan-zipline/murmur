@@ -136,7 +136,7 @@ pub(in crate::daemon) async fn handle_manager_start(
             &manager_id,
             project,
             &wt.dir,
-            &shared.paths.murmur_dir,
+            &shared.paths.socket_path,
             Some(&allowed_tools),
             true,
             Some(&system_prompt),

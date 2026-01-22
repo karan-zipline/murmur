@@ -58,7 +58,7 @@ Notes:
 - A reference permissions template ships in the repo as `permissions.toml.default`.
 - The `tk` backend stores issues inside the project repo clone under `.murmur/tickets/`.
 - `project remove` unregisters a project; by default it does *not* delete the repo clone.
-- The daemon socket is a Unix domain socket named `murmur.sock`. By default it is placed in `XDG_RUNTIME_DIR` when available; when `MURMUR_DIR` is set, it is placed under `$MURMUR_DIR/murmur.sock`.
+- The daemon socket is a Unix domain socket named `murmur.sock`. By default it is placed under `~/.murmur/murmur.sock` (or `$MURMUR_DIR/murmur.sock` when `MURMUR_DIR` is set). When `MURMUR_SOCKET_PATH` is set, it overrides the socket path.
 
 ---
 

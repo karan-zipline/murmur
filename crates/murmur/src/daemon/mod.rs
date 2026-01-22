@@ -209,7 +209,7 @@ async fn spawn_agent_without_issue(
             &agent_id,
             &project,
             &wt.dir,
-            &shared.paths.murmur_dir,
+            &shared.paths.socket_path,
             None,
             false,
             None,
@@ -386,7 +386,7 @@ async fn spawn_agent_with_kickoff(
             &agent_id,
             &project,
             &wt.dir,
-            &shared.paths.murmur_dir,
+            &shared.paths.socket_path,
             None,
             false,
             None,
@@ -568,7 +568,7 @@ async fn spawn_claude_agent_process(
     agent_id: &str,
     project: &str,
     worktree_dir: &Path,
-    murmur_dir: &Path,
+    socket_path: &Path,
     permissions_allow: Option<&[String]>,
     is_manager: bool,
     append_system_prompt: Option<&str>,
@@ -579,6 +579,7 @@ async fn spawn_claude_agent_process(
     u32,
 )> {
     let hook_exe_prefix = claude::hook_exe_prefix();
+    let socket_path_str = socket_path.to_string_lossy();
 
     let hook_timeout_sec = 5 * 60;
     let mut settings = serde_json::json!({
@@ -589,7 +590,7 @@ async fn spawn_claude_agent_process(
                     "hooks": [
                         {
                             "type": "command",
-                            "command": claude::render_shell_command(&[&hook_exe_prefix, "hook", "PreToolUse"]),
+                            "command": claude::render_shell_command(&[&hook_exe_prefix, "--socket-path", socket_path_str.as_ref(), "hook", "PreToolUse"]),
                             "timeout": hook_timeout_sec,
                         }
                     ]
@@ -601,7 +602,7 @@ async fn spawn_claude_agent_process(
                     "hooks": [
                         {
                             "type": "command",
-                            "command": claude::render_shell_command(&[&hook_exe_prefix, "hook", "PermissionRequest"]),
+                            "command": claude::render_shell_command(&[&hook_exe_prefix, "--socket-path", socket_path_str.as_ref(), "hook", "PermissionRequest"]),
                             "timeout": hook_timeout_sec,
                         }
                     ]
@@ -612,7 +613,7 @@ async fn spawn_claude_agent_process(
                     "hooks": [
                         {
                             "type": "command",
-                            "command": claude::render_shell_command(&[&hook_exe_prefix, "hook", "Stop"]),
+                            "command": claude::render_shell_command(&[&hook_exe_prefix, "--socket-path", socket_path_str.as_ref(), "hook", "Stop"]),
                             "timeout": 10,
                         }
                     ]
@@ -646,7 +647,7 @@ async fn spawn_claude_agent_process(
     ])
     .env("MURMUR_AGENT_ID", agent_id)
     .env("MURMUR_PROJECT", project)
-    .env("MURMUR_DIR", murmur_dir)
+    .env("MURMUR_SOCKET_PATH", socket_path)
     .current_dir(worktree_dir)
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
@@ -835,7 +836,7 @@ async fn codex_run_turn(
         agent_id,
         &project,
         worktree_dir,
-        &shared.paths.murmur_dir,
+        &shared.paths.socket_path,
         thread_id.as_deref(),
         &prompt,
     )
@@ -903,36 +904,42 @@ async fn spawn_codex_turn_process(
     agent_id: &str,
     project: &str,
     worktree_dir: &Path,
-    murmur_dir: &Path,
+    socket_path: &Path,
     thread_id: Option<&str>,
     prompt: &str,
 ) -> anyhow::Result<(tokio::process::Child, tokio::process::ChildStdout, u32)> {
     let mut cmd = tokio::process::Command::new("codex");
+    cmd.arg("exec");
+    if let Some(socket_dir) = socket_path.parent() {
+        cmd.arg("--add-dir").arg(socket_dir);
+    }
     if let Some(thread_id) = thread_id {
+        cmd.arg("resume");
         cmd.args([
-            "exec",
-            "resume",
             "--json",
             "--full-auto",
             "-c",
             r#"model_reasoning_effort="xhigh""#,
-            thread_id,
-            prompt,
+            "-c",
+            "sandbox_workspace_write.network_access=true",
         ]);
+        cmd.arg(thread_id);
+        cmd.arg(prompt);
     } else {
         cmd.args([
-            "exec",
             "--json",
             "--full-auto",
             "-c",
             r#"model_reasoning_effort="xhigh""#,
-            prompt,
+            "-c",
+            "sandbox_workspace_write.network_access=true",
         ]);
+        cmd.arg(prompt);
     }
 
     cmd.env("MURMUR_AGENT_ID", agent_id)
         .env("MURMUR_PROJECT", project)
-        .env("MURMUR_DIR", murmur_dir)
+        .env("MURMUR_SOCKET_PATH", socket_path)
         .current_dir(worktree_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
