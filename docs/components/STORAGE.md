@@ -72,8 +72,13 @@ Notes:
 ### Agent runtime (`runtime/agents.json`)
 
 - Best-effort snapshot of agent runtime metadata.
-- Used to resume agents across daemon restarts when possible (backend-dependent).
-- Written atomically (write temp file + rename).
+- Written atomically (write temp file + rename) after agent spawn and state changes.
+- **On daemon restart**, agents are rehydrated from this file:
+  - Agents whose worktrees still exist are restored to the in-memory registry.
+  - Process liveness is checked via `/proc/<pid>`.
+  - Live processes are marked `Running`; dead processes are marked `Exited`.
+  - This allows `mm agent claim` and `mm agent done` to work for agents spawned in previous daemon sessions.
+  - Note: Chat history and Codex thread IDs are lost on restart; only agent metadata is preserved.
 
 ### Webhook dedup (`runtime/dedup.json`)
 

@@ -256,6 +256,8 @@ fn manager_start_send_message_status_and_stop() {
         "demo",
         "--remote-url",
         origin.to_str().unwrap(),
+        "--backend",
+        "claude",
     ]);
     add.assert().success().stdout("ok\n");
 
@@ -264,15 +266,24 @@ fn manager_start_send_message_status_and_stop() {
     start.args(["manager", "start", "demo"]);
     start.assert().success().stdout("ok\n");
 
-    let mut list_agents = cargo_bin_cmd!("mm");
-    list_agents.env("MURMUR_DIR", murmur_dir.path());
-    list_agents.args(["agent", "list"]);
-    list_agents
-        .assert()
-        .success()
-        .stdout(predicates::str::contains(
-            "manager-demo\tdemo\tmanager\trunning\tmanager",
-        ));
+    // Wait for the manager agent to transition from starting to running.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if Instant::now() > deadline {
+            panic!("timed out waiting for manager agent to reach running state");
+        }
+
+        let mut list_agents = cargo_bin_cmd!("mm");
+        list_agents.env("MURMUR_DIR", murmur_dir.path());
+        list_agents.args(["agent", "list"]);
+        let out = list_agents.assert().success().get_output().stdout.clone();
+        let s = String::from_utf8_lossy(&out);
+        if s.contains("manager-demo\tdemo\tmanager\trunning\tmanager") {
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(50));
+    }
 
     let mut send = cargo_bin_cmd!("mm");
     send.env("MURMUR_DIR", murmur_dir.path());

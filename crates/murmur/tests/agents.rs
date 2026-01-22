@@ -187,6 +187,8 @@ fn agent_lifecycle_creates_worktree_persists_runtime_and_records_chat() {
         "demo",
         "--remote-url",
         origin.to_str().unwrap(),
+        "--backend",
+        "claude",
     ]);
     add.assert().success().stdout("ok\n");
 
@@ -302,6 +304,8 @@ fn agent_tail_streams_chat_events() {
         "demo",
         "--remote-url",
         origin.to_str().unwrap(),
+        "--backend",
+        "claude",
     ]);
     add.assert().success().stdout("ok\n");
 

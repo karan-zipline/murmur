@@ -119,6 +119,12 @@ pub async fn run(client: &impl TuiClient) -> Result<()> {
                                     Err(_) => None,
                                 }
                             }
+                            murmur_protocol::EVT_AGENT_CREATED => {
+                                match serde_json::from_value::<murmur_protocol::AgentCreatedEvent>(event.payload) {
+                                    Ok(evt) => Some(Msg::AgentCreated(evt)),
+                                    Err(_) => None,
+                                }
+                            }
                             murmur_protocol::EVT_PERMISSION_REQUEST => {
                                 match serde_json::from_value::<murmur_protocol::PermissionRequest>(event.payload) {
                                     Ok(req) => Some(Msg::PermissionRequested(req)),

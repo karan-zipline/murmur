@@ -192,6 +192,7 @@ pub enum Msg {
     Action(Action),
 
     AgentListLoaded(Result<Vec<AgentInfo>, String>),
+    AgentCreated(murmur_protocol::AgentCreatedEvent),
     AgentChatReceived(murmur_protocol::AgentChatEvent),
     AgentChatHistoryLoaded {
         agent_id: String,
@@ -756,6 +757,10 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                 model.status = Some(err);
             }
         },
+        Msg::AgentCreated(_evt) => {
+            // When a new agent is created, refresh the agent list
+            effects.push(Effect::FetchAgentList);
+        }
         Msg::AgentChatReceived(evt) => {
             let (chat_width, chat_height) = chat_viewport(&model);
             let buf = model

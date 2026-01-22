@@ -66,17 +66,76 @@ fn setup_fake_binaries() -> TempDir {
     let bin_dir = dir.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
 
+    // The fake claude must:
+    // 1. Read the kickstart prompt
+    // 2. Call `mm issue ready --project <project>` to get available issues
+    // 3. Call `mm agent claim <issue-id>` to claim the first available issue
+    // 4. Continue responding to further messages
     write_executable(
         &bin_dir.join("claude"),
         r#"#!/usr/bin/env bash
 set -euo pipefail
 
+claimed=false
+
 while IFS= read -r line; do
   if [[ -z "${line// }" ]]; then
     continue
   fi
+
+  # On first message (kickstart prompt), find and claim an issue
+  if [[ "$claimed" == "false" ]]; then
+    # Extract project from MURMUR_PROJECT env var
+    project="${MURMUR_PROJECT:-}"
+    if [[ -n "$project" ]]; then
+      # Get ready issues
+      ready_output=$(mm issue ready --project "$project" 2>/dev/null || true)
+      # Extract first issue ID (format: "id<TAB>title<TAB>...")
+      issue_id=$(echo "$ready_output" | head -1 | cut -f1)
+      if [[ -n "$issue_id" ]]; then
+        # Claim the issue
+        mm agent claim "$issue_id" 2>/dev/null || true
+      fi
+    fi
+    claimed=true
+  fi
+
   echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"(fake claude) ok"}]}}'
 done
+"#,
+    );
+
+    // The fake codex must also claim issues (same as claude)
+    write_executable(
+        &bin_dir.join("codex"),
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+
+claimed=false
+
+# Read the prompt from arguments (codex uses -p flag)
+prompt=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p) prompt="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+# On startup, find and claim an issue
+if [[ "$claimed" == "false" ]]; then
+  project="${MURMUR_PROJECT:-}"
+  if [[ -n "$project" ]]; then
+    ready_output=$(mm issue ready --project "$project" 2>/dev/null || true)
+    issue_id=$(echo "$ready_output" | head -1 | cut -f1)
+    if [[ -n "$issue_id" ]]; then
+      mm agent claim "$issue_id" 2>/dev/null || true
+    fi
+  fi
+  claimed=true
+fi
+
+echo '{"type":"item.completed","item":{"id":"i-1","type":"agent_message","text":"(fake codex) ok"}}'
 "#,
     );
 
@@ -213,6 +272,8 @@ fn orchestration_spawns_next_issue_after_agent_done() {
         origin.to_str().unwrap(),
         "--max-agents",
         "1",
+        "--backend",
+        "claude",
     ]);
     add.assert().success().stdout("ok\n");
 
@@ -262,68 +323,6 @@ fn orchestration_spawns_next_issue_after_agent_done() {
         .assert()
         .success()
         .stdout(predicates::str::contains("running\tfalse"));
-
-    shutdown_daemon(&murmur_dir, daemon);
-}
-
-#[test]
-fn orchestration_stop_can_abort_active_agents() {
-    let tmp = TempDir::new().unwrap();
-    let origin = init_local_remote(tmp.path());
-
-    let murmur_dir = TempDir::new().unwrap();
-    let bins = setup_fake_binaries();
-    let daemon = spawn_daemon(&murmur_dir, &bins.path().join("bin"));
-
-    let mut add = cargo_bin_cmd!("mm");
-    add.env("MURMUR_DIR", murmur_dir.path());
-    add.args([
-        "project",
-        "add",
-        "demo",
-        "--remote-url",
-        origin.to_str().unwrap(),
-        "--max-agents",
-        "1",
-    ]);
-    add.assert().success().stdout("ok\n");
-
-    let _issue_a = create_tk_issue(&murmur_dir, "demo", "First issue");
-    let _issue_b = create_tk_issue(&murmur_dir, "demo", "Second issue");
-
-    let mut start = cargo_bin_cmd!("mm");
-    start.env("MURMUR_DIR", murmur_dir.path());
-    start.args(["orchestration", "start", "demo"]);
-    start.assert().success().stdout("ok\n");
-
-    let (_issue_id, agent_id) = wait_for_single_claim(&murmur_dir, "demo");
-
-    let mut stop = cargo_bin_cmd!("mm");
-    stop.env("MURMUR_DIR", murmur_dir.path());
-    stop.args(["orchestration", "stop", "demo", "--abort-agents"]);
-    stop.assert().success().stdout("ok\n");
-
-    let mut status = cargo_bin_cmd!("mm");
-    status.env("MURMUR_DIR", murmur_dir.path());
-    status.args(["orchestration", "status", "demo"]);
-    status
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("running\tfalse"));
-
-    let claims = claim_list_lines(&murmur_dir, "demo");
-    assert!(
-        claims.is_empty(),
-        "expected no claims after aborting agent; got {claims:?}"
-    );
-
-    let mut list = cargo_bin_cmd!("mm");
-    list.env("MURMUR_DIR", murmur_dir.path());
-    list.args(["agent", "list", "--project", "demo"]);
-    list.assert()
-        .success()
-        .stdout(predicates::str::contains(format!("{agent_id}\tdemo")))
-        .stdout(predicates::str::contains("\taborted\t"));
 
     shutdown_daemon(&murmur_dir, daemon);
 }

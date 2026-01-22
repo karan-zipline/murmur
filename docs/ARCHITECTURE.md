@@ -36,7 +36,7 @@ These are explicitly out of scope for the current implementation:
 
 - Remote/HTTP API for client control
 - Distributed scheduling or cluster coordination
-- Guaranteed agent preservation across daemon restarts
+- Perfect agent preservation across daemon restarts (best-effort rehydration is supported)
 - Additional issue trackers beyond tk, GitHub, Linear
 
 ---
@@ -156,10 +156,11 @@ Each project has an orchestrator that:
 
 1. Polls for ready issues (~10 second interval)
 2. Filters by backend rules (status, authors)
-3. Skips already-claimed issues
-4. Spawns agents up to `max-agents`
-5. Claims issues on spawn
-6. Triggers merge on agent completion
+3. Counts unclaimed issues
+4. Spawns agents up to `max-agents` (agents claim issues themselves)
+5. Triggers merge on agent completion
+
+Agents use a pull-based model: each agent runs `mm issue ready` to find work and `mm agent claim <id>` to claim it.
 
 ### Agents
 
@@ -379,7 +380,10 @@ After `attach`, the daemon pushes events:
 1. Resolve paths (MurmurPaths)
 2. Load config.toml
 3. Initialize SharedState
-4. Load persisted agent metadata (best-effort recovery)
+4. Rehydrate agents from runtime/agents.json:
+   - Skip agents whose worktrees no longer exist
+   - Check process liveness via /proc/<pid>
+   - Restore agent runtime entries for CLI commands
 5. Bind Unix socket
 6. Start webhook server (if enabled)
 7. Start orchestrators for autostart projects
@@ -405,7 +409,7 @@ CLI: mm project add <url> --name myproj
 └─────────────────────────────────────────┘
 ```
 
-### 3. Orchestration Tick
+### 3. Orchestration Tick (Agent-Driven Model)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -413,15 +417,20 @@ CLI: mm project add <url> --name myproj
 │                                                                  │
 │  1. Query ready issues from backend                              │
 │  2. Filter by backend rules (status, authors)                    │
-│  3. Filter out claimed issues                                    │
-│  4. Compute spawn plan (murmur-core)                            │
+│  3. Count unclaimed issues                                       │
+│  4. Compute how many agents to spawn:                            │
 │     → available = max_agents - active_agents                    │
-│     → spawn up to 'available' unclaimed issues                  │
-│  5. For each issue in plan:                                      │
+│     → spawn min(available, unclaimed_issues) agents             │
+│  5. For each agent to spawn:                                     │
 │     a. Create worktree                                           │
 │     b. Spawn agent process                                       │
-│     c. Record claim                                              │
-│     d. Send kickstart prompt                                     │
+│     c. Send kickstart prompt (agent claims its own issue)        │
+│                                                                  │
+│ Agent-driven issue selection:                                    │
+│  - Agents run `mm issue ready` to find available work            │
+│  - Agents run `mm agent claim <id>` to claim an issue            │
+│  - If claim fails (already claimed), agent picks another         │
+│  - If no issues available, agent runs `mm agent done`            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

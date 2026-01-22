@@ -9,7 +9,7 @@ use murmur_core::claims::ClaimRegistry;
 use murmur_core::config::AgentBackend;
 use murmur_core::paths::MurmurPaths;
 use murmur_core::stream::{InputMessage, MessageBody, StreamMessage};
-use murmur_protocol::{AgentChatEvent, Event, EVT_AGENT_CHAT};
+use murmur_protocol::{AgentChatEvent, AgentCreatedEvent, Event, EVT_AGENT_CHAT, EVT_AGENT_CREATED};
 use tokio::io::{BufReader, BufWriter};
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -96,6 +96,11 @@ pub async fn run_foreground(paths: &MurmurPaths) -> anyhow::Result<()> {
         commits: tokio::sync::Mutex::new(std::collections::BTreeMap::new()),
     });
 
+    // Restore agents from disk so that agents from previous sessions are recognized
+    if let Err(err) = rehydrate_agents(shared.clone()).await {
+        tracing::warn!(error = %err, "failed to rehydrate agents from disk");
+    }
+
     tokio::spawn(server::heartbeat_loop(shared.clone(), shutdown_rx.clone()));
     tokio::spawn(server::shutdown_signal_watcher(handle.clone()));
     tokio::spawn({
@@ -127,6 +132,176 @@ async fn spawn_agent(
     backend_override: Option<AgentBackend>,
 ) -> anyhow::Result<AgentRecord> {
     spawn_agent_with_kickoff(shared, project, issue_id, None, backend_override).await
+}
+
+/// Spawn an agent without pre-assigning an issue.
+/// The agent will use the kickstart prompt to find and claim issues itself.
+async fn spawn_agent_without_issue(
+    shared: Arc<SharedState>,
+    project: String,
+    kickoff_message: String,
+) -> anyhow::Result<AgentRecord> {
+    let agent_num = shared.next_agent_id.fetch_add(1, Ordering::Relaxed);
+    let agent_id = format!("a-{agent_num}");
+
+    // No claim here - agent will claim an issue after being spawned
+
+    let wtm = WorktreeManager::new(&shared.git, &shared.paths);
+    let wt = match wtm.create_agent_worktree(&project, &agent_id).await {
+        Ok(wt) => wt,
+        Err(err) => {
+            return Err(err).with_context(|| format!("create worktree for agent {agent_id}"));
+        }
+    };
+
+    let created_at_ms = now_ms();
+
+    let backend = {
+        let cfg = shared.config.lock().await;
+        cfg.project(&project)
+            .map(|p| p.effective_coding_backend())
+            .unwrap_or_default()
+    };
+
+    // Empty issue_id - agent will claim one via mm agent claim
+    let record = AgentRecord::new(
+        agent_id.clone(),
+        project.clone(),
+        AgentRole::Coding,
+        String::new(),
+        created_at_ms,
+        wt.dir.to_string_lossy().to_string(),
+    );
+
+    let (outbound_tx, outbound_rx) = mpsc::channel::<ChatMessage>(32);
+    let (abort_tx, abort_rx) = watch::channel(false);
+
+    // CRITICAL: Register agent BEFORE spawning process to avoid race condition
+    // where agent tries to call `mm agent claim` before it's registered.
+    {
+        let mut agents = shared.agents.lock().await;
+        agents.agents.insert(
+            agent_id.clone(),
+            AgentRuntime {
+                record: record.clone(),
+                backend,
+                codex_thread_id: None,
+                chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
+                last_idle_at_ms: None,
+                outbound_tx: outbound_tx.clone(),
+                abort_tx: abort_tx.clone(),
+                tasks: Vec::new(),
+            },
+        );
+    }
+
+    // Emit agent created event so TUI can refresh its agent list
+    emit_agent_created_event(
+        shared.as_ref(),
+        &agent_info_from_record(&record, backend),
+    );
+
+    // NOW spawn the process - agent is already registered
+    let mut pending_claude = None;
+    let mut record = record;
+    if backend == AgentBackend::Claude {
+        let (child, stdin, stdout, pid) = match spawn_claude_agent_process(
+            &agent_id,
+            &project,
+            &wt.dir,
+            &shared.paths.murmur_dir,
+            None,
+            false,
+            None,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(err) => {
+                // Cleanup: remove agent registration on spawn failure
+                {
+                    let mut agents = shared.agents.lock().await;
+                    agents.agents.remove(&agent_id);
+                }
+                let _ = wtm.remove_worktree(&project, &wt.dir).await;
+                return Err(err).with_context(|| format!("spawn claude agent {agent_id}"));
+            }
+        };
+
+        record = record.apply_event(AgentEvent::Spawned { pid }, created_at_ms);
+        pending_claude = Some((child, stdin, stdout));
+
+        // Update record with PID
+        {
+            let mut agents = shared.agents.lock().await;
+            if let Some(rt) = agents.agents.get_mut(&agent_id) {
+                rt.record = record.clone();
+            }
+        }
+    }
+
+    let mut tasks = Vec::new();
+    match backend {
+        AgentBackend::Claude => {
+            let Some((child, stdin, stdout)) = pending_claude else {
+                return Err(anyhow!("claude process missing after spawn"));
+            };
+            tasks.push(tokio::spawn(claude_stdin_writer(
+                outbound_rx,
+                stdin,
+                abort_rx.clone(),
+            )));
+            tasks.push(tokio::spawn(claude_stdout_reader(
+                shared.clone(),
+                agent_id.clone(),
+                stdout,
+                abort_rx.clone(),
+            )));
+            tasks.push(tokio::spawn(claude_reaper(
+                shared.clone(),
+                agent_id.clone(),
+                child,
+                abort_rx.clone(),
+            )));
+        }
+        AgentBackend::Codex => {
+            tasks.push(tokio::spawn(codex_worker(
+                shared.clone(),
+                agent_id.clone(),
+                wt.dir.clone(),
+                outbound_rx,
+                abort_rx.clone(),
+            )));
+        }
+    }
+
+    {
+        let mut agents = shared.agents.lock().await;
+        if let Some(rt) = agents.agents.get_mut(&agent_id) {
+            rt.tasks = tasks;
+        }
+    }
+
+    // Send the kickstart message
+    let msg = ChatMessage::new(ChatRole::User, kickoff_message, now_ms());
+
+    let outbound = {
+        let mut agents = shared.agents.lock().await;
+        if let Some(rt) = agents.agents.get_mut(&agent_id) {
+            rt.chat.push(msg.clone());
+            Some(rt.outbound_tx.clone())
+        } else {
+            None
+        }
+    };
+
+    if let Some(tx) = outbound {
+        emit_agent_chat_event(shared.as_ref(), &agent_id, &project, msg.clone());
+        let _ = tx.send(msg).await;
+    }
+
+    persist_agents_runtime(shared).await;
+    Ok(record)
 }
 
 async fn spawn_agent_with_kickoff(
@@ -162,11 +337,11 @@ async fn spawn_agent_with_kickoff(
             let cfg = shared.config.lock().await;
             cfg.project(&project)
                 .map(|p| p.effective_coding_backend())
-                .unwrap_or(AgentBackend::Claude)
+                .unwrap_or_default()
         }
     };
 
-    let mut record = AgentRecord::new(
+    let record = AgentRecord::new(
         agent_id.clone(),
         project.clone(),
         AgentRole::Coding,
@@ -178,7 +353,34 @@ async fn spawn_agent_with_kickoff(
     let (outbound_tx, outbound_rx) = mpsc::channel::<ChatMessage>(32);
     let (abort_tx, abort_rx) = watch::channel(false);
 
+    // CRITICAL: Register agent BEFORE spawning process to avoid race condition
+    // where agent tries to call `mm agent claim` before it's registered.
+    {
+        let mut agents = shared.agents.lock().await;
+        agents.agents.insert(
+            agent_id.clone(),
+            AgentRuntime {
+                record: record.clone(),
+                backend,
+                codex_thread_id: None,
+                chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
+                last_idle_at_ms: None,
+                outbound_tx: outbound_tx.clone(),
+                abort_tx: abort_tx.clone(),
+                tasks: Vec::new(),
+            },
+        );
+    }
+
+    // Emit agent created event so TUI can refresh its agent list
+    emit_agent_created_event(
+        shared.as_ref(),
+        &agent_info_from_record(&record, backend),
+    );
+
+    // NOW spawn the process - agent is already registered
     let mut pending_claude = None;
+    let mut record = record;
     if backend == AgentBackend::Claude {
         let (child, stdin, stdout, pid) = match spawn_claude_agent_process(
             &agent_id,
@@ -193,6 +395,11 @@ async fn spawn_agent_with_kickoff(
         {
             Ok(v) => v,
             Err(err) => {
+                // Cleanup: remove agent registration on spawn failure
+                {
+                    let mut agents = shared.agents.lock().await;
+                    agents.agents.remove(&agent_id);
+                }
                 let _ = wtm.remove_worktree(&project, &wt.dir).await;
                 release_claim(&shared, &project, &issue_id).await;
                 return Err(err).with_context(|| format!("spawn claude agent {agent_id}"));
@@ -201,23 +408,14 @@ async fn spawn_agent_with_kickoff(
 
         record = record.apply_event(AgentEvent::Spawned { pid }, created_at_ms);
         pending_claude = Some((child, stdin, stdout));
-    }
 
-    {
-        let mut agents = shared.agents.lock().await;
-        agents.agents.insert(
-            agent_id.clone(),
-            AgentRuntime {
-                record: record.clone(),
-                backend,
-                codex_thread_id: None,
-                chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
-                last_idle_at_ms: None,
-                outbound_tx: outbound_tx.clone(),
-                abort_tx,
-                tasks: Vec::new(),
-            },
-        );
+        // Update record with PID
+        {
+            let mut agents = shared.agents.lock().await;
+            if let Some(rt) = agents.agents.get_mut(&agent_id) {
+                rt.record = record.clone();
+            }
+        }
     }
 
     let mut tasks = Vec::new();
@@ -447,10 +645,7 @@ async fn spawn_claude_agent_process(
         &settings_json,
     ])
     .env("MURMUR_AGENT_ID", agent_id)
-    .env("MURMUR_AGENT_ID", agent_id)
     .env("MURMUR_PROJECT", project)
-    .env("MURMUR_PROJECT", project)
-    .env("MURMUR_DIR", murmur_dir)
     .env("MURMUR_DIR", murmur_dir)
     .current_dir(worktree_dir)
     .stdin(std::process::Stdio::piped())
@@ -627,16 +822,18 @@ async fn codex_run_turn(
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncBufReadExt as _;
 
-    let thread_id = {
+    let (thread_id, project) = {
         let agents = shared.agents.lock().await;
-        agents
-            .agents
-            .get(agent_id)
-            .and_then(|rt| rt.codex_thread_id.clone())
+        let rt = agents.agents.get(agent_id);
+        (
+            rt.and_then(|rt| rt.codex_thread_id.clone()),
+            rt.map(|rt| rt.record.project.clone()).unwrap_or_default(),
+        )
     };
 
     let (mut child, stdout, pid) = spawn_codex_turn_process(
         agent_id,
+        &project,
         worktree_dir,
         &shared.paths.murmur_dir,
         thread_id.as_deref(),
@@ -704,6 +901,7 @@ async fn codex_run_turn(
 
 async fn spawn_codex_turn_process(
     agent_id: &str,
+    project: &str,
     worktree_dir: &Path,
     murmur_dir: &Path,
     thread_id: Option<&str>,
@@ -733,8 +931,7 @@ async fn spawn_codex_turn_process(
     }
 
     cmd.env("MURMUR_AGENT_ID", agent_id)
-        .env("MURMUR_AGENT_ID", agent_id)
-        .env("MURMUR_DIR", murmur_dir)
+        .env("MURMUR_PROJECT", project)
         .env("MURMUR_DIR", murmur_dir)
         .current_dir(worktree_dir)
         .stdin(std::process::Stdio::null())
@@ -792,6 +989,20 @@ fn emit_agent_chat_event(shared: &SharedState, agent_id: &str, project: &str, ms
     });
 }
 
+fn emit_agent_created_event(shared: &SharedState, agent: &murmur_protocol::AgentInfo) {
+    let payload = serde_json::to_value(AgentCreatedEvent {
+        agent: agent.clone(),
+    })
+    .unwrap_or(serde_json::Value::Null);
+
+    let id = shared.next_event_id.fetch_add(1, Ordering::Relaxed);
+    let _ = shared.events_tx.send(Event {
+        r#type: EVT_AGENT_CREATED.to_owned(),
+        id: format!("evt-{id}"),
+        payload,
+    });
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -813,6 +1024,97 @@ async fn persist_agents_runtime(shared: Arc<SharedState>) {
     if let Err(err) = runtime_store::save_agents(&shared.paths, &agents_json).await {
         tracing::debug!(error = %err, "persist agents runtime failed");
     }
+}
+
+/// Restore agents from disk on daemon startup.
+/// This allows agents spawned in previous daemon sessions to be recognized
+/// so that `mm agent claim` and `mm agent done` work after daemon restarts.
+async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
+    let infos = runtime_store::load_agents(&shared.paths).await?;
+
+    for info in infos {
+        // Skip if worktree doesn't exist
+        let wt_path = std::path::PathBuf::from(&info.worktree_dir);
+        if !wt_path.exists() {
+            tracing::debug!(agent_id = %info.id, "skipping rehydration - worktree missing");
+            continue;
+        }
+
+        // Skip if agent is already in memory (shouldn't happen, but be safe)
+        {
+            let agents = shared.agents.lock().await;
+            if agents.agents.contains_key(&info.id) {
+                continue;
+            }
+        }
+
+        // Convert protocol role to core role
+        let role = match info.role {
+            murmur_protocol::AgentRole::Coding => AgentRole::Coding,
+            murmur_protocol::AgentRole::Planner => AgentRole::Planner,
+            murmur_protocol::AgentRole::Manager => AgentRole::Manager,
+        };
+
+        // Convert backend string to enum
+        let backend = match info.backend.as_deref() {
+            Some("claude") => AgentBackend::Claude,
+            _ => AgentBackend::Codex,
+        };
+
+        // Check if process is still running
+        let process_alive = info.pid.map(is_process_running).unwrap_or(false);
+
+        // Create agent record
+        let mut record = AgentRecord::new(
+            info.id.clone(),
+            info.project.clone(),
+            role,
+            info.issue_id.clone(),
+            info.created_at_ms,
+            info.worktree_dir.clone(),
+        );
+
+        // Apply events based on process status
+        if let Some(pid) = info.pid {
+            record = record.apply_event(AgentEvent::Spawned { pid }, info.created_at_ms);
+        }
+        if !process_alive {
+            // Process is dead, mark as exited
+            record = record.apply_event(AgentEvent::Exited { code: info.exit_code }, now_ms());
+        }
+
+        let (outbound_tx, _) = mpsc::channel::<ChatMessage>(32);
+        let (abort_tx, _) = watch::channel(false);
+
+        let mut agents = shared.agents.lock().await;
+        agents.agents.insert(
+            info.id.clone(),
+            AgentRuntime {
+                record,
+                backend,
+                codex_thread_id: None, // Lost on restart, Codex conversations can't resume
+                chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
+                last_idle_at_ms: None,
+                outbound_tx,
+                abort_tx,
+                tasks: Vec::new(),
+            },
+        );
+
+        tracing::info!(
+            agent_id = %info.id,
+            project = %info.project,
+            process_alive = %process_alive,
+            "rehydrated agent"
+        );
+    }
+
+    Ok(())
+}
+
+fn is_process_running(pid: u32) -> bool {
+    // Check if process exists by checking /proc/<pid> on Linux
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
 fn project_dir(paths: &MurmurPaths, name: &str) -> std::path::PathBuf {

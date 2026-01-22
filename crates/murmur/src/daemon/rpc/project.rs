@@ -90,7 +90,7 @@ pub(in crate::daemon) async fn handle_project_add(
         Some("claude") => AgentBackend::Claude,
         Some("codex") => AgentBackend::Codex,
         Some(other) => return error_response(req, &format!("unknown backend: {other}")),
-        None => AgentBackend::Claude,
+        None => AgentBackend::Codex,
     };
 
     let project = ProjectConfig {

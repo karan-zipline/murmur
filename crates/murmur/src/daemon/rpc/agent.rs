@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use murmur_core::agent::{AgentEvent, ChatMessage, ChatRole};
+use murmur_core::agent::{AgentEvent, AgentState, ChatMessage, ChatRole};
 use murmur_core::commits::{CommitLog, CommitRecord as CoreCommitRecord};
 use murmur_core::config::{AgentBackend, MergeStrategy};
 use murmur_protocol::{
@@ -77,7 +77,7 @@ pub(in crate::daemon) async fn handle_agent_create(
             .agents
             .get(&record.id)
             .map(|rt| rt.backend)
-            .unwrap_or(AgentBackend::Claude)
+            .unwrap_or_default()
     };
 
     let payload = AgentCreateResponse {
@@ -127,8 +127,12 @@ pub(in crate::daemon) async fn handle_agent_abort(
     let now_ms = now_ms();
     let mut quit_msg: Option<ChatMessage> = None;
 
+    // Acquire both locks in consistent order (agents first, then claims) to prevent deadlocks
+    // and hold them together to ensure atomic abort + claim release.
     let (abort_tx, outbound_tx, project) = {
         let mut agents = shared.agents.lock().await;
+        let mut claims = shared.claims.lock().await;
+
         let Some(rt) = agents.agents.get_mut(&abort.agent_id) else {
             return error_response(req, "agent not found");
         };
@@ -142,6 +146,12 @@ pub(in crate::daemon) async fn handle_agent_abort(
         rt.record = rt
             .record
             .apply_event(AgentEvent::Aborted { by: "user" }, now_ms);
+
+        // Release claims while still holding the agents lock to prevent race condition
+        // where a claim could be created between setting Aborted state and releasing claims.
+        let released = claims.release_by_agent(&abort.agent_id);
+        *claims = released;
+
         (
             rt.abort_tx.clone(),
             rt.outbound_tx.clone(),
@@ -161,8 +171,6 @@ pub(in crate::daemon) async fn handle_agent_abort(
     } else {
         let _ = abort_tx.send(true);
     }
-
-    release_claims_for_agent(&shared, &abort.agent_id).await;
     persist_agents_runtime(shared.clone()).await;
 
     Response {
@@ -281,45 +289,58 @@ pub(in crate::daemon) async fn handle_agent_claim(
     }
 
     let now_ms = now_ms();
-    let project = {
-        let mut agents = shared.agents.lock().await;
-        let Some(rt) = agents.agents.get_mut(agent_id) else {
-            return error_response(req, "agent not found");
-        };
-        if rt.record.role != murmur_core::agent::AgentRole::Coding {
-            return error_response(req, "agent is not a coding agent");
-        }
 
+    // Acquire both locks in a consistent order (agents first, then claims) to prevent deadlocks.
+    // Hold both locks together to prevent race conditions with abort.
+    let mut agents = shared.agents.lock().await;
+    let mut claims = shared.claims.lock().await;
+
+    let Some(rt) = agents.agents.get_mut(agent_id) else {
+        return error_response(req, "agent not found");
+    };
+    if rt.record.role != murmur_core::agent::AgentRole::Coding {
+        return error_response(req, "agent is not a coding agent");
+    }
+    if rt.record.state == AgentState::Aborted {
+        return error_response(req, "agent is aborted");
+    }
+
+    let project = rt.record.project.clone();
+
+    if let Some(existing) = claims.agent_for(&project, issue_id) {
+        if existing != agent_id {
+            return error_response(req, "issue already claimed");
+        }
+        // Already claimed by this agent, just update the record
         rt.record = rt
             .record
             .apply_event(AgentEvent::AssignedIssue { issue_id }, now_ms);
-        rt.record.project.clone()
-    };
-
-    {
-        let mut claims = shared.claims.lock().await;
-        if let Some(existing) = claims.agent_for(&project, issue_id) {
-            if existing != agent_id {
-                return error_response(req, "issue already claimed");
-            }
-            persist_agents_runtime(shared.clone()).await;
-            return Response {
-                r#type: MSG_AGENT_CLAIM.to_owned(),
-                id: req.id,
-                success: true,
-                error: None,
-                payload: serde_json::Value::Null,
-            };
-        }
-
-        let next = claims
-            .release_by_agent(agent_id)
-            .claim(&project, issue_id, agent_id);
-        *claims = match next {
-            Ok(v) => v,
-            Err(_) => return error_response(req, "issue already claimed"),
+        drop(claims);
+        drop(agents);
+        persist_agents_runtime(shared.clone()).await;
+        return Response {
+            r#type: MSG_AGENT_CLAIM.to_owned(),
+            id: req.id,
+            success: true,
+            error: None,
+            payload: serde_json::Value::Null,
         };
     }
+
+    let next = claims
+        .release_by_agent(agent_id)
+        .claim(&project, issue_id, agent_id);
+    *claims = match next {
+        Ok(v) => v,
+        Err(_) => return error_response(req, "issue already claimed"),
+    };
+
+    rt.record = rt
+        .record
+        .apply_event(AgentEvent::AssignedIssue { issue_id }, now_ms);
+
+    drop(claims);
+    drop(agents);
 
     persist_agents_runtime(shared.clone()).await;
 

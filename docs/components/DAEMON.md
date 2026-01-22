@@ -40,7 +40,12 @@ The daemon does *not* implement business rules as side-effecting code:
 2. Load config: `crates/murmur/src/config_store.rs`.
 3. Initialize `SharedState`:
    - `config`, `agents`, `claims`, `orchestrators`, `pending_permissions`, `pending_questions`, etc.
-4. Load persisted runtime metadata (best-effort) to resume agents/plans/managers.
+4. **Rehydrate agents** from `runtime/agents.json`:
+   - Load persisted agent metadata from disk.
+   - Skip agents whose worktrees no longer exist.
+   - Check if agent processes are still running (via `/proc/<pid>`).
+   - Restore agent runtime entries so that `mm agent claim` and `mm agent done` work for agents from previous daemon sessions.
+   - Agents with dead processes are marked as `Exited`.
 5. Start the Unix socket server (`murmur.sock`). By default, the socket is placed in `XDG_RUNTIME_DIR` when available; when `MURMUR_DIR` is set, it is placed under `$MURMUR_DIR/murmur.sock`.
 6. Start webhook server if enabled.
 7. Autostart orchestrators for projects with `autostart = true`.

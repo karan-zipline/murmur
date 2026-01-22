@@ -18,6 +18,44 @@ Code pointers:
 
 ---
 
+## Agent-Driven Issue Selection
+
+Agents use a pull-based model for issue assignment:
+
+1. The orchestrator spawns agents without pre-assigning issues.
+2. Each agent receives a **kickstart prompt** instructing it to:
+   - Run `mm issue ready --project <name>` to find available tasks.
+   - Run `mm agent claim <id>` to claim an issue.
+   - If the issue is already claimed, pick a different one.
+   - If all issues are claimed, run `mm agent done` to finish.
+3. The claim registry prevents duplicate work — only one agent can claim a given issue.
+
+This model gives agents autonomy to select work and handles race conditions gracefully.
+
+---
+
+## Agent Persistence and Rehydration
+
+Agent metadata is persisted to `runtime/agents.json` after spawn and state changes.
+
+**On daemon restart:**
+- Agents are rehydrated from disk so that `mm agent claim` and `mm agent done` continue to work.
+- The daemon checks if each agent's worktree still exists.
+- Process liveness is checked via `/proc/<pid>`.
+- Live processes are restored as `Running`; dead processes are marked `Exited`.
+
+**What is preserved:**
+- Agent ID, project, role, issue ID
+- Worktree directory, PID, exit code
+- Backend type (claude/codex)
+
+**What is lost on restart:**
+- Chat history (in-memory only)
+- Codex thread IDs (conversations cannot resume)
+- Active Tokio tasks and channels
+
+---
+
 ## Agent Record vs Agent Runtime
 
 Murmur decomplects agent state into:

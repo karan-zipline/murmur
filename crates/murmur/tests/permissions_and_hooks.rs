@@ -178,6 +178,8 @@ fn add_project(murmur_dir: &TempDir, origin: &Path) {
         "demo",
         "--remote-url",
         origin.to_str().unwrap(),
+        "--backend",
+        "claude",
     ]);
     add.assert().success().stdout("ok\n");
 }

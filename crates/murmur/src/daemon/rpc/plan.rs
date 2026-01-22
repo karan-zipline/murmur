@@ -83,7 +83,7 @@ pub(in crate::daemon) async fn handle_plan_start(
             let cfg = shared.config.lock().await;
             cfg.project(&project)
                 .map(|p| p.effective_planner_backend())
-                .unwrap_or(AgentBackend::Claude)
+                .unwrap_or_default()
         };
 
         (wt, backend)
@@ -99,7 +99,7 @@ pub(in crate::daemon) async fn handle_plan_start(
                 branch: String::new(),
                 base_branch: String::new(),
             },
-            AgentBackend::Claude,
+            AgentBackend::Codex,
         )
     };
 

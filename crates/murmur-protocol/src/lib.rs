@@ -62,6 +62,7 @@ pub const MSG_MANAGER_CLEAR_HISTORY: &str = "manager.clear_history";
 
 pub const EVT_HEARTBEAT: &str = "heartbeat";
 pub const EVT_AGENT_CHAT: &str = "agent.chat";
+pub const EVT_AGENT_CREATED: &str = "agent.created";
 pub const EVT_PERMISSION_REQUEST: &str = "permission.requested";
 pub const EVT_USER_QUESTION: &str = "question.requested";
 pub const EVT_AGENT_IDLE: &str = "agent.idle";
@@ -133,6 +134,11 @@ pub struct AgentChatEvent {
     pub agent_id: String,
     pub project: String,
     pub message: ChatMessage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentCreatedEvent {
+    pub agent: AgentInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

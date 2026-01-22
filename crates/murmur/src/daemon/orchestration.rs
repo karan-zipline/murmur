@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use murmur_core::orchestration::orchestrator_tick;
 use tokio::sync::watch;
 
-use super::{issue_backend_for_project, spawn_agent_with_kickoff, SharedState};
+use super::{issue_backend_for_project, spawn_agent_without_issue, SharedState};
 
 pub(in crate::daemon) async fn request_orchestrator_tick(
     shared: Arc<SharedState>,
@@ -125,6 +125,7 @@ async fn orchestrator_tick_once(shared: Arc<SharedState>, project: &str) -> anyh
         completed.get(project).cloned().unwrap_or_default()
     };
 
+    // Use orchestrator_tick to determine how many unclaimed issues exist
     let plan = orchestrator_tick(
         project,
         active_agents,
@@ -136,39 +137,64 @@ async fn orchestrator_tick_once(shared: Arc<SharedState>, project: &str) -> anyh
         &claims,
     );
 
-    for issue_id in plan.issue_ids {
+    // Spawn agents without pre-assigning issues.
+    // Agents will find and claim issues themselves using `mm issue ready` and `mm agent claim`.
+    let to_spawn = plan.issue_ids.len();
+    let kickstart = build_kickstart_prompt(project);
+
+    for _ in 0..to_spawn {
         let active = count_active_agents(shared.as_ref(), project).await as usize;
         if active >= max_agents {
             break;
         }
 
-        let issue_id_for_log = issue_id.clone();
-
-        let title = ready
-            .iter()
-            .find(|i| i.id == issue_id)
-            .map(|i| i.title.trim())
-            .filter(|t| !t.is_empty())
-            .unwrap_or("");
-
-        let kickoff = if title.is_empty() {
-            format!("Start work on issue {issue_id}.")
-        } else {
-            format!("Start work on issue {issue_id}: {title}")
-        };
-
-        if let Err(err) = spawn_agent_with_kickoff(
+        if let Err(err) = spawn_agent_without_issue(
             shared.clone(),
             project.to_owned(),
-            issue_id,
-            Some(kickoff),
-            None,
+            kickstart.clone(),
         )
         .await
         {
-            tracing::warn!(project = %project, issue_id = %issue_id_for_log, error = ?err, "spawn agent failed");
+            tracing::warn!(project = %project, error = ?err, "spawn agent failed");
         }
     }
 
     Ok(())
+}
+
+fn build_kickstart_prompt(project: &str) -> String {
+    format!(
+        r#"The 'mm' command is available on PATH.
+
+## Finding Work
+
+Run `mm issue ready --project {project}` to find available tasks.
+Pick one and run `mm agent claim <id>` to claim it.
+If already claimed by another agent, pick a different one from the list.
+If all tasks are claimed, run `mm agent done` to finish your session.
+
+## Workflow
+
+Read the issue carefully and decide how to proceed:
+
+1. **IMPLEMENT**: If the issue is clear, proceed with coding.
+2. **ASK QUESTIONS**: If you need clarification, use `mm issue comment <id> --body "Your question"` to ask, then run `mm agent done` (do NOT close the issue).
+3. **DECOMPOSE**: If the issue is complex:
+   - Create sub-issues with `mm issue create "Sub-task title" --depends-on <id>`
+   - Then run `mm agent done` (do NOT close the parent issue).
+
+## When Implementation is Complete
+
+1. Run all relevant tests and quality checks
+2. Commit your changes with a descriptive message
+3. Close the issue: `mm issue close <id>`
+4. Signal completion: `mm agent done`
+
+## Important Notes
+
+- Do NOT run `git push` — merging and pushing happens automatically when you run `mm agent done`
+- Only close an issue when you have COMPLETED the implementation
+- Do NOT close if you only added comments or created sub-issues
+"#
+    )
 }

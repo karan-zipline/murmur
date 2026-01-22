@@ -46,7 +46,7 @@ mod tests {
             max_agents: 1,
             issue_backend: IssueBackend::Tk,
             permissions_checker: PermissionsChecker::Manual,
-            agent_backend: AgentBackend::Claude,
+            agent_backend: AgentBackend::Codex,
             planner_backend: None,
             coding_backend: None,
             merge_strategy: MergeStrategy::Direct,

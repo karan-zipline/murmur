@@ -158,9 +158,9 @@ pub enum PermissionsChecker {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AgentBackend {
     #[serde(rename = "claude")]
-    #[default]
     Claude,
     #[serde(rename = "codex")]
+    #[default]
     Codex,
 }
 
@@ -521,7 +521,7 @@ mod tests {
                     max_agents: 3,
                     issue_backend: IssueBackend::Tk,
                     permissions_checker: PermissionsChecker::Manual,
-                    agent_backend: AgentBackend::Claude,
+                    agent_backend: AgentBackend::Codex,
                     planner_backend: None,
                     coding_backend: None,
                     merge_strategy: MergeStrategy::Direct,
@@ -621,7 +621,7 @@ mod tests {
             max_agents: 3,
             issue_backend: IssueBackend::Tk,
             permissions_checker: PermissionsChecker::Manual,
-            agent_backend: AgentBackend::Claude,
+            agent_backend: AgentBackend::Codex,
             planner_backend: None,
             coding_backend: None,
             merge_strategy: MergeStrategy::Direct,

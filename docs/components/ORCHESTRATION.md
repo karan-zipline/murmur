@@ -47,16 +47,35 @@ Inspect via CLI:
 
 ---
 
-## Spawn Policy
+## Spawn Policy (Agent-Driven Model)
+
+Murmur uses a **pull-based** orchestration model where agents select their own issues:
 
 At each tick:
 1. Query ready issues from the configured backend.
-2. Apply any backend-specific “ready” semantics (blocked status, allowed authors, etc).
-3. Compute a spawn plan via `murmur-core`.
-4. Spawn up to `available_slots = max_agents - active_agents` new agents.
+2. Apply any backend-specific "ready" semantics (blocked status, allowed authors, etc).
+3. Compute how many unclaimed issues exist via `murmur-core`.
+4. Spawn up to `min(available_slots, unclaimed_issues)` new agents.
+5. Each agent is spawned **without a pre-assigned issue**.
 
 Agents are created in dedicated worktrees:
 - `projects/<project>/worktrees/wt-<agent-id>/`
+
+### Kickstart Prompt
+
+Each spawned agent receives a kickstart prompt instructing it to:
+
+```
+Run `mm issue ready --project <name>` to find available tasks.
+Pick one and run `mm agent claim <id>` to claim it.
+If already claimed by another agent, pick a different one.
+If all tasks are claimed, run `mm agent done` to finish.
+```
+
+This model:
+- Gives agents autonomy to select appropriate work.
+- Handles race conditions gracefully (claim failures are recoverable).
+- Matches the behavior of similar multi-agent orchestration systems.
 
 Details: `docs/components/WORKTREES_AND_MERGE.md`.
 
