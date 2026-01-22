@@ -125,6 +125,12 @@ pub async fn run(client: &impl TuiClient) -> Result<()> {
                                     Err(_) => None,
                                 }
                             }
+                            murmur_protocol::EVT_AGENT_DELETED => {
+                                match serde_json::from_value::<murmur_protocol::AgentDeletedEvent>(event.payload) {
+                                    Ok(evt) => Some(Msg::AgentDeleted(evt)),
+                                    Err(_) => None,
+                                }
+                            }
                             murmur_protocol::EVT_PERMISSION_REQUEST => {
                                 match serde_json::from_value::<murmur_protocol::PermissionRequest>(event.payload) {
                                     Ok(req) => Some(Msg::PermissionRequested(req)),

@@ -23,8 +23,9 @@ use super::super::merge::{
 };
 use super::super::{
     agent_info_from_record, cleanup_agent_runtime, emit_agent_chat_event,
+    emit_agent_deleted_event,
     issue_backend_for_project, mark_issue_completed, now_ms, persist_agents_runtime,
-    release_claims_for_agent, spawn_agent, stop_agent_runtime_keep_worktree, to_proto_chat_message,
+    release_claims_for_agent, spawn_agent, to_proto_chat_message,
     SharedState,
 };
 use super::error_response;
@@ -193,12 +194,13 @@ pub(in crate::daemon) async fn handle_agent_delete(
         Err(err) => return error_response(req, &format!("invalid payload: {err}")),
     };
 
-    let runtime = {
+    let (runtime, project) = {
         let mut agents = shared.agents.lock().await;
         let Some(rt) = agents.agents.remove(&delete.agent_id) else {
             return error_response(req, "agent not found");
         };
-        rt
+        let project = rt.record.project.clone();
+        (rt, project)
     };
 
     if let Err(err) = cleanup_agent_runtime(shared.clone(), runtime).await {
@@ -207,6 +209,7 @@ pub(in crate::daemon) async fn handle_agent_delete(
 
     release_claims_for_agent(&shared, &delete.agent_id).await;
     persist_agents_runtime(shared.clone()).await;
+    emit_agent_deleted_event(shared.as_ref(), &delete.agent_id, &project);
 
     Response {
         r#type: MSG_AGENT_DELETE.to_owned(),
@@ -473,6 +476,7 @@ pub(in crate::daemon) async fn handle_agent_done(
         }
 
         persist_agents_runtime(shared.clone()).await;
+        emit_agent_deleted_event(shared.as_ref(), &agent_id, &project);
 
         return Response {
             r#type: MSG_AGENT_DONE.to_owned(),
@@ -485,6 +489,34 @@ pub(in crate::daemon) async fn handle_agent_done(
 
     if role != murmur_core::agent::AgentRole::Coding {
         return error_response(req, "agent.done only supports coding and planner agents");
+    }
+
+    // Fab-style lifecycle: if the agent never claimed an issue, "done" means "end session".
+    // Do not attempt merge/PR/issue-close automation in this case.
+    if issue_id.trim().is_empty() {
+        let runtime = {
+            let mut agents = shared.agents.lock().await;
+            let Some(rt) = agents.agents.remove(&agent_id) else {
+                return error_response(req, "agent not found");
+            };
+            rt
+        };
+
+        if let Err(err) = cleanup_agent_runtime(shared.clone(), runtime).await {
+            return error_response(req, &format!("cleanup agent failed: {err:#}"));
+        }
+
+        release_claims_for_agent(&shared, &agent_id).await;
+        persist_agents_runtime(shared.clone()).await;
+        emit_agent_deleted_event(shared.as_ref(), &agent_id, &project);
+
+        return Response {
+            r#type: MSG_AGENT_DONE.to_owned(),
+            id: req.id,
+            success: true,
+            error: None,
+            payload: serde_json::Value::Null,
+        };
     }
 
     let merge_strategy = {
@@ -644,6 +676,7 @@ pub(in crate::daemon) async fn handle_agent_done(
             mark_issue_completed(&shared, &project, &issue_id).await;
             release_claims_for_agent(&shared, &agent_id).await;
             persist_agents_runtime(shared.clone()).await;
+            emit_agent_deleted_event(shared.as_ref(), &agent_id, &project);
 
             Response {
                 r#type: MSG_AGENT_DONE.to_owned(),
@@ -851,13 +884,24 @@ pub(in crate::daemon) async fn handle_agent_done(
                 emit_agent_chat_event(shared.as_ref(), &agent_id, &project, msg);
             }
 
-            if let Err(err) = stop_agent_runtime_keep_worktree(shared.clone(), &agent_id).await {
-                return error_response(req, &format!("stop agent failed: {err:#}"));
+            // Mirror fab behavior: once the PR is created, remove the agent from the system.
+            // The PR contains the work; the agent process and worktree should not linger.
+            let runtime = {
+                let mut agents = shared.agents.lock().await;
+                let Some(rt) = agents.agents.remove(&agent_id) else {
+                    return error_response(req, "agent not found");
+                };
+                rt
+            };
+
+            if let Err(err) = cleanup_agent_runtime(shared.clone(), runtime).await {
+                return error_response(req, &format!("cleanup agent failed: {err:#}"));
             }
 
             mark_issue_completed(&shared, &project, &issue_id).await;
             release_claims_for_agent(&shared, &agent_id).await;
             persist_agents_runtime(shared.clone()).await;
+            emit_agent_deleted_event(shared.as_ref(), &agent_id, &project);
 
             Response {
                 r#type: MSG_AGENT_DONE.to_owned(),

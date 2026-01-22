@@ -193,6 +193,7 @@ pub enum Msg {
 
     AgentListLoaded(Result<Vec<AgentInfo>, String>),
     AgentCreated(murmur_protocol::AgentCreatedEvent),
+    AgentDeleted(murmur_protocol::AgentDeletedEvent),
     AgentChatReceived(murmur_protocol::AgentChatEvent),
     AgentChatHistoryLoaded {
         agent_id: String,
@@ -731,13 +732,13 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
 
                 let mut agents = agents;
                 agents.sort_by(|a, b| {
-                    role_rank(a.role)
-                        .cmp(&role_rank(b.role))
+                    state_rank(a.state)
+                        .cmp(&state_rank(b.state))
+                        .then(role_rank(a.role).cmp(&role_rank(b.role)))
                         .then(a.id.cmp(&b.id))
                 });
 
                 model.agents = agents;
-
                 if model.agents.is_empty() {
                     model.selected_agent = 0;
                 } else if let Some(id) = prev_selected_id
@@ -759,6 +760,10 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
         },
         Msg::AgentCreated(_evt) => {
             // When a new agent is created, refresh the agent list
+            effects.push(Effect::FetchAgentList);
+        }
+        Msg::AgentDeleted(_evt) => {
+            // When an agent is deleted, refresh the agent list
             effects.push(Effect::FetchAgentList);
         }
         Msg::AgentChatReceived(evt) => {
@@ -1178,6 +1183,16 @@ fn role_rank(role: murmur_protocol::AgentRole) -> u8 {
     }
 }
 
+fn state_rank(state: murmur_protocol::AgentState) -> u8 {
+    match state {
+        murmur_protocol::AgentState::NeedsResolution => 0,
+        murmur_protocol::AgentState::Running => 1,
+        murmur_protocol::AgentState::Starting => 2,
+        murmur_protocol::AgentState::Exited => 3,
+        murmur_protocol::AgentState::Aborted => 4,
+    }
+}
+
 const RECONNECT_BASE_MS: u64 = 500;
 const RECONNECT_MAX_MS: u64 = 10_000;
 const RECONNECT_MAX_ATTEMPTS: u32 = 10;
@@ -1420,6 +1435,7 @@ mod tests {
             pid: None,
             exit_code: None,
             created_at_ms: 0,
+            updated_at_ms: 0,
         }];
 
         let (model, _effects) = reduce(model, Msg::AgentListLoaded(Ok(agents)));
@@ -1460,6 +1476,7 @@ mod tests {
             pid: None,
             exit_code: None,
             created_at_ms: 1,
+            updated_at_ms: 0,
         }];
         model.selected_agent = 0;
         model.mode = Mode::Input;
@@ -1566,6 +1583,7 @@ mod tests {
             pid: None,
             exit_code: None,
             created_at_ms: 0,
+            updated_at_ms: 0,
         }];
         model.selected_agent = 0;
         model.pending_permissions = vec![
@@ -1614,6 +1632,7 @@ mod tests {
             pid: None,
             exit_code: None,
             created_at_ms: 0,
+            updated_at_ms: 0,
         }];
         model.selected_agent = 0;
 
@@ -1669,6 +1688,7 @@ mod tests {
             pid: None,
             exit_code: None,
             created_at_ms: 0,
+            updated_at_ms: 0,
         }];
         model.selected_agent = 0;
 
@@ -1721,6 +1741,7 @@ mod tests {
             pid: None,
             exit_code: None,
             created_at_ms: 0,
+            updated_at_ms: 0,
         }];
         model.selected_agent = 0;
 

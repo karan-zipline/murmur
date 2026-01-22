@@ -513,23 +513,18 @@ Plan ID: {plan_id}
 async fn send_kickoff_message(
     shared: Arc<SharedState>,
     agent_id: &str,
-    project: &str,
+    _project: &str,
     kickoff: String,
 ) {
     let msg = ChatMessage::new(ChatRole::User, kickoff, now_ms());
-
     let outbound = {
-        let mut agents = shared.agents.lock().await;
-        if let Some(rt) = agents.agents.get_mut(agent_id) {
-            rt.chat.push(msg.clone());
-            Some(rt.outbound_tx.clone())
-        } else {
-            None
-        }
+        let agents = shared.agents.lock().await;
+        agents.agents.get(agent_id).map(|rt| rt.outbound_tx.clone())
     };
 
+    // Send the kickoff message to the agent, but do not store or emit it.
+    // (We want the TUI chat view to start at the first agent response.)
     if let Some(tx) = outbound {
-        emit_agent_chat_event(shared.as_ref(), agent_id, project, msg.clone());
         let _ = tx.send(msg).await;
     }
 }

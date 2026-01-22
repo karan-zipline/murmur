@@ -1725,7 +1725,11 @@ async fn dispatch_issue(args: IssueArgs, paths: &MurmurPaths) -> anyhow::Result<
             println!("labels\t{}", iss.labels.join(","));
             println!("links\t{}", iss.links.join(","));
             println!();
-            println!("{}", iss.description);
+            if iss.description.trim().is_empty() {
+                println!("No description");
+            } else {
+                println!("{}", iss.description);
+            }
             Ok(())
         }
         IssueCommand::Ready => {

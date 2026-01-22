@@ -63,6 +63,7 @@ pub const MSG_MANAGER_CLEAR_HISTORY: &str = "manager.clear_history";
 pub const EVT_HEARTBEAT: &str = "heartbeat";
 pub const EVT_AGENT_CHAT: &str = "agent.chat";
 pub const EVT_AGENT_CREATED: &str = "agent.created";
+pub const EVT_AGENT_DELETED: &str = "agent.deleted";
 pub const EVT_PERMISSION_REQUEST: &str = "permission.requested";
 pub const EVT_USER_QUESTION: &str = "question.requested";
 pub const EVT_AGENT_IDLE: &str = "agent.idle";
@@ -139,6 +140,12 @@ pub struct AgentChatEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCreatedEvent {
     pub agent: AgentInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentDeletedEvent {
+    pub agent_id: String,
+    pub project: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,6 +295,8 @@ pub struct AgentInfo {
     pub state: AgentState,
     #[serde(default)]
     pub created_at_ms: u64,
+    #[serde(default)]
+    pub updated_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

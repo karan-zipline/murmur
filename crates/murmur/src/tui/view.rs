@@ -107,8 +107,7 @@ fn draw_agents(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect
     } else {
         for (idx, agent) in model.agents.iter().enumerate() {
             let selected = idx == model.selected_agent;
-            let prefix = if selected { "▶ " } else { "  " };
-            let mut line = vec![Span::raw(prefix)];
+            let mut line = Vec::new();
             line.push(Span::styled(
                 agent_state_icon(agent, model.now_ms),
                 state_style(agent.state),
@@ -175,7 +174,7 @@ fn draw_agents(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect
             ));
             line.push(Span::raw(" "));
             line.push(Span::styled(
-                duration_label(model.now_ms, agent.created_at_ms),
+                duration_label_for_agent(model.now_ms, agent),
                 Style::default().fg(Color::Gray),
             ));
             line.push(Span::raw(" "));
@@ -195,7 +194,7 @@ fn draw_agents(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect
         }
     }
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
 }
 
@@ -225,11 +224,26 @@ fn state_style(state: murmur_protocol::AgentState) -> Style {
     }
 }
 
-fn duration_label(now_ms: u64, created_at_ms: u64) -> String {
-    if now_ms == 0 || created_at_ms == 0 || now_ms < created_at_ms {
+fn duration_label_for_agent(now_ms: u64, agent: &murmur_protocol::AgentInfo) -> String {
+    let created_at_ms = agent.created_at_ms;
+    if created_at_ms == 0 {
         return "--:--".to_owned();
     }
-    format_duration_compact(now_ms - created_at_ms)
+
+    let end_ms = match agent.state {
+        murmur_protocol::AgentState::Starting
+        | murmur_protocol::AgentState::Running
+        | murmur_protocol::AgentState::NeedsResolution => now_ms,
+        murmur_protocol::AgentState::Exited | murmur_protocol::AgentState::Aborted => {
+            agent.updated_at_ms
+        }
+    };
+
+    if end_ms == 0 || end_ms < created_at_ms {
+        return "--:--".to_owned();
+    }
+
+    format_duration_compact(end_ms - created_at_ms)
 }
 
 fn format_duration_compact(ms: u64) -> String {
@@ -807,6 +821,7 @@ mod tests {
                 issue_id: "ISSUE-1".to_owned(),
                 state: murmur_protocol::AgentState::Running,
                 created_at_ms: 1_000_000 - 65_000,
+                updated_at_ms: 0,
                 backend: Some("codex".to_owned()),
                 description: None,
                 worktree_dir: "/tmp".to_owned(),
@@ -820,6 +835,7 @@ mod tests {
                 issue_id: "manager".to_owned(),
                 state: murmur_protocol::AgentState::Running,
                 created_at_ms: 1_000_000 - 1_000,
+                updated_at_ms: 0,
                 backend: Some("claude".to_owned()),
                 description: None,
                 worktree_dir: "/tmp".to_owned(),
@@ -833,6 +849,7 @@ mod tests {
                 issue_id: "ISSUE-2".to_owned(),
                 state: murmur_protocol::AgentState::Exited,
                 created_at_ms: 0,
+                updated_at_ms: 0,
                 backend: None,
                 description: None,
                 worktree_dir: "/tmp".to_owned(),
@@ -867,6 +884,7 @@ mod tests {
             issue_id: "ISSUE-1".to_owned(),
             state: murmur_protocol::AgentState::Running,
             created_at_ms: 1,
+            updated_at_ms: 0,
             backend: Some("codex".to_owned()),
             description: None,
             worktree_dir: "/tmp".to_owned(),

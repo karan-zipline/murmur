@@ -282,23 +282,10 @@ async fn spawn_agent_without_issue(
         }
     }
 
-    // Send the kickstart message
+    // Send the kickstart message to the agent, but do not store or emit it.
+    // (We want the TUI chat view to start at the first agent response.)
     let msg = ChatMessage::new(ChatRole::User, kickoff_message, now_ms());
-
-    let outbound = {
-        let mut agents = shared.agents.lock().await;
-        if let Some(rt) = agents.agents.get_mut(&agent_id) {
-            rt.chat.push(msg.clone());
-            Some(rt.outbound_tx.clone())
-        } else {
-            None
-        }
-    };
-
-    if let Some(tx) = outbound {
-        emit_agent_chat_event(shared.as_ref(), &agent_id, &project, msg.clone());
-        let _ = tx.send(msg).await;
-    }
+    let _ = outbound_tx.send(msg).await;
 
     persist_agents_runtime(shared).await;
     Ok(record)
@@ -462,21 +449,7 @@ async fn spawn_agent_with_kickoff(
 
     if let Some(message) = kickoff_message {
         let msg = ChatMessage::new(ChatRole::User, message, now_ms());
-
-        let outbound = {
-            let mut agents = shared.agents.lock().await;
-            if let Some(rt) = agents.agents.get_mut(&agent_id) {
-                rt.chat.push(msg.clone());
-                Some(rt.outbound_tx.clone())
-            } else {
-                None
-            }
-        };
-
-        if let Some(tx) = outbound {
-            emit_agent_chat_event(shared.as_ref(), &agent_id, &project, msg.clone());
-            let _ = tx.send(msg).await;
-        }
+        let _ = outbound_tx.send(msg).await;
     }
 
     persist_agents_runtime(shared).await;
@@ -523,43 +496,6 @@ async fn cleanup_agent_runtime(
     wtm.remove_worktree(&runtime.record.project, worktree_dir)
         .await
         .context("remove worktree")?;
-
-    Ok(())
-}
-
-async fn stop_agent_runtime_keep_worktree(
-    shared: Arc<SharedState>,
-    agent_id: &str,
-) -> anyhow::Result<()> {
-    let (abort_tx, mut tasks) = {
-        let mut agents = shared.agents.lock().await;
-        let Some(rt) = agents.agents.get_mut(agent_id) else {
-            return Err(anyhow!("agent not found"));
-        };
-        (rt.abort_tx.clone(), std::mem::take(&mut rt.tasks))
-    };
-
-    let _ = abort_tx.send(true);
-    for task in tasks.drain(..) {
-        let _ = tokio::time::timeout(Duration::from_secs(3), task).await;
-    }
-
-    let now_ms = now_ms();
-    {
-        let mut agents = shared.agents.lock().await;
-        if let Some(rt) = agents.agents.get_mut(agent_id) {
-            if matches!(
-                rt.record.state,
-                murmur_core::agent::AgentState::Starting
-                    | murmur_core::agent::AgentState::Running
-                    | murmur_core::agent::AgentState::NeedsResolution
-            ) {
-                let code = rt.record.exit_code;
-                rt.record = rt.record.apply_event(AgentEvent::Exited { code }, now_ms);
-            }
-            rt.tasks = Vec::new();
-        }
-    }
 
     Ok(())
 }
@@ -1010,6 +946,25 @@ fn emit_agent_created_event(shared: &SharedState, agent: &murmur_protocol::Agent
     });
 }
 
+pub(in crate::daemon) fn emit_agent_deleted_event(
+    shared: &SharedState,
+    agent_id: &str,
+    project: &str,
+) {
+    let payload = serde_json::to_value(murmur_protocol::AgentDeletedEvent {
+        agent_id: agent_id.to_owned(),
+        project: project.to_owned(),
+    })
+    .unwrap_or(serde_json::Value::Null);
+
+    let id = shared.next_event_id.fetch_add(1, Ordering::Relaxed);
+    let _ = shared.events_tx.send(Event {
+        r#type: murmur_protocol::EVT_AGENT_DELETED.to_owned(),
+        id: format!("evt-{id}"),
+        payload,
+    });
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1040,6 +995,15 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
     let infos = runtime_store::load_agents(&shared.paths).await?;
 
     for info in infos {
+        // Mirror fab behavior: only show/live-rehydrate active agents.
+        // Completed (exited/aborted) agents should not linger in the UI across sessions.
+        if matches!(
+            info.state,
+            murmur_protocol::AgentState::Exited | murmur_protocol::AgentState::Aborted
+        ) {
+            continue;
+        }
+
         // Skip if worktree doesn't exist
         let wt_path = std::path::PathBuf::from(&info.worktree_dir);
         if !wt_path.exists() {
@@ -1070,6 +1034,9 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
 
         // Check if process is still running
         let process_alive = info.pid.map(is_process_running).unwrap_or(false);
+        if !process_alive {
+            continue;
+        }
 
         // Create agent record
         let mut record = AgentRecord::new(
@@ -1084,10 +1051,6 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
         // Apply events based on process status
         if let Some(pid) = info.pid {
             record = record.apply_event(AgentEvent::Spawned { pid }, info.created_at_ms);
-        }
-        if !process_alive {
-            // Process is dead, mark as exited
-            record = record.apply_event(AgentEvent::Exited { code: info.exit_code }, now_ms());
         }
 
         let (outbound_tx, _) = mpsc::channel::<ChatMessage>(32);
@@ -1116,6 +1079,8 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
         );
     }
 
+    // Prune any terminal/stale agents from disk.
+    persist_agents_runtime(shared).await;
     Ok(())
 }
 

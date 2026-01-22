@@ -69,6 +69,7 @@ pub(in crate::daemon) fn agent_info_from_record(
             murmur_core::agent::AgentState::Aborted => ProtoAgentState::Aborted,
         },
         created_at_ms: record.created_at_ms,
+        updated_at_ms: record.updated_at_ms,
         backend: Some(
             match backend {
                 AgentBackend::Claude => "claude",

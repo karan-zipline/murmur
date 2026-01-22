@@ -166,42 +166,48 @@ async fn orchestrator_tick_once(shared: Arc<SharedState>, project: &str) -> anyh
 fn build_kickstart_prompt(project: &str, socket_path: &Path) -> String {
     let socket_path = socket_path.to_string_lossy();
     format!(
-        r#"The 'mm' command is available on PATH.
+        r###"The `mm` command is available on PATH (use `mm`, not `./mm`).
 
-## Finding Work
+You are a Murmur coding agent for project `{project}`.
 
-The Murmur daemon socket is:
+The Murmur daemon is already running and reachable at:
 `{socket_path}`
 
-Use `mm --socket-path {socket_path} ...` for all `mm` commands.
+(`MURMUR_SOCKET_PATH` is already set for you; you should not need `--socket-path`.)
 
-Run `mm --socket-path {socket_path} issue ready --project {project}` to find available tasks.
-Pick one and run `mm --socket-path {socket_path} agent claim <id>` to claim it.
-If already claimed by another agent, pick a different one from the list.
-If all tasks are claimed, run `mm --socket-path {socket_path} agent done` to finish your session.
+## Find Work
+
+1. List available issues: `mm issue ready`
+2. Claim one: `mm agent claim <issue-id>`
+3. Set your status: `mm agent describe "<short description>"`
+
+If the issue you picked is already claimed, pick a different one from `mm issue ready`.
+If no issues are available (or you did not claim anything), run `mm agent done` to exit; it should not create a PR or attempt merges.
 
 ## Workflow
 
 Read the issue carefully and decide how to proceed:
 
 1. **IMPLEMENT**: If the issue is clear, proceed with coding.
-2. **ASK QUESTIONS**: If you need clarification, use `mm --socket-path {socket_path} issue comment <id> --body "Your question"` to ask, then run `mm --socket-path {socket_path} agent done` (do NOT close the issue).
+2. **ASK QUESTIONS**: If you need clarification, use `mm issue comment <issue-id> --body "Your question"` to ask, then run `mm agent done` (do NOT close the issue).
 3. **DECOMPOSE**: If the issue is complex:
-   - Create sub-issues with `mm --socket-path {socket_path} issue create "Sub-task title" --depends-on <id>`
-   - Then run `mm --socket-path {socket_path} agent done` (do NOT close the parent issue).
+   - Add a plan with `mm issue plan <issue-id> --body "## Steps\n- Step 1\n- Step 2"`
+   - Create sub-issues with `mm issue create "Sub-task title" --depends-on <issue-id>`
+   - Then run `mm agent done` (do NOT close the parent issue).
 
 ## When Implementation is Complete
 
 1. Run all relevant tests and quality checks
 2. Commit your changes with a descriptive message
-3. Close the issue: `mm --socket-path {socket_path} issue close <id>`
-4. Signal completion: `mm --socket-path {socket_path} agent done`
+3. Close the issue: `mm issue close <issue-id>`
+4. Signal completion: `mm agent done`
 
 ## Important Notes
 
-- Do NOT run `git push` — merging and pushing happens automatically when you run `mm --socket-path {socket_path} agent done`
+- Do NOT run `mm daemon` or `mm project start/stop` (the daemon is already running)
+- Do NOT run `git push` — merging and pushing happens automatically when you run `mm agent done`
 - Only close an issue when you have COMPLETED the implementation
-- Do NOT close if you only added comments or created sub-issues
-"#
+- Do NOT close if you only added comments, a plan, or created sub-issues
+"###,
     )
 }
