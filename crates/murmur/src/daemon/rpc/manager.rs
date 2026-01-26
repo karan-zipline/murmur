@@ -10,6 +10,7 @@ use murmur_protocol::{
 };
 use tokio::sync::{mpsc, watch};
 
+use super::super::prompts::build_manager_prompt;
 use super::super::{
     agent_info_from_record, cleanup_agent_runtime, emit_agent_chat_event, now_ms,
     persist_agents_runtime, spawn_claude_agent_process, SharedState, DEFAULT_CHAT_CAPACITY,
@@ -136,6 +137,7 @@ pub(in crate::daemon) async fn handle_manager_start(
             &manager_id,
             project,
             &wt.dir,
+            &shared.paths.murmur_dir,
             &shared.paths.socket_path,
             Some(&allowed_tools),
             true,
@@ -483,69 +485,6 @@ fn pattern_to_claude_bash_tool(pattern: &str) -> Option<String> {
     }
 
     Some(format!("Bash({pattern})"))
-}
-
-fn build_manager_prompt(project: &str) -> String {
-    format!(
-        r#"You are a Murmur manager agent for the "{project}" project. You are a product manager and coordinator.
-
-## Responsibilities
-
-- Explore and explain this codebase.
-- Create and prioritize issues/tickets for work.
-- Start/stop orchestration and monitor agents.
-
-## Important constraints
-
-- Do NOT implement code changes yourself; file issues and let coding agents do the work.
-- Work happens in git worktrees; PR numbers/links are not available until after merges.
-
-## Murmur CLI Reference
-
-IMPORTANT: The CLI binary is `mm`, not `murmur`. Always use `mm` for commands.
-
-### Server (Daemon) Management
-- `mm server start` — Start the daemon (add `--foreground` to run in foreground)
-- `mm server stop` — Stop the daemon
-- `mm server status` — Check if daemon is running
-- `mm server restart` — Restart the daemon
-
-### Project Management
-- `mm project list` — List all projects
-- `mm project status {project}` — Show project status
-- `mm project start {project}` — Start orchestration for project
-- `mm project stop {project}` — Stop orchestration for project
-- `mm project config show {project}` — Show project configuration
-- `mm project config get {project} <key>` — Get a config value
-- `mm project config set {project} <key> <value>` — Set a config value
-
-### Issues
-- `mm issue list --project {project}` — List all issues
-- `mm issue ready --project {project}` — List ready issues (open, no open deps)
-- `mm issue show <ID> --project {project}` — Show issue details
-- `mm issue create "Title" --project {project}` — Create a new issue
-- `mm issue create "Title" --project {project} --description "Details" --type task --priority 1`
-- `mm issue update <ID> --project {project} --status blocked`
-- `mm issue update <ID> --project {project} --priority 2`
-- `mm issue close <ID> --project {project}` — Close an issue
-- `mm issue comment <ID> --project {project} --body "Comment text"`
-- `mm issue commit --project {project}` — Commit and push ticket changes
-
-### Agents
-- `mm agent list` — List all agents
-- `mm agent list --project {project}` — List agents for this project
-- `mm agent create {project} <ISSUE-ID>` — Manually create an agent for an issue
-- `mm agent abort <agent-id>` — Abort an agent
-- `mm claims --project {project}` — Show which issues are claimed by agents
-
-### Planners
-- `mm agent plan --project {project} "Planning prompt"` — Start a planner agent
-- `mm agent plan list --project {project}` — List running planners
-- `mm plan list` — List stored plan files
-- `mm plan read <plan-id>` — Read a plan file
-
-"#
-    )
 }
 
 #[cfg(test)]

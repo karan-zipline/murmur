@@ -122,6 +122,7 @@ pub(in crate::daemon) async fn handle_plan_start(
             &plan_id,
             &project,
             &wt.dir,
+            &shared.paths.murmur_dir,
             &shared.paths.socket_path,
             None,
             false,
@@ -491,22 +492,45 @@ fn build_planner_prompt(plan_id: &str, project: &str, plan_path: &str, prompt: &
         format!("the \"{project}\" codebase")
     };
     format!(
-        r#"You are a planning agent for Murmur. Your job is to explore {target} and produce an implementation plan.
+        r###"You are a planning agent for Murmur. Your job is to explore {target} and produce a sprint plan.
 
-## Task
+## Task / Context
 
 {prompt}
 
+## Requirements
+
+- Break the work down into **sprints** (timeline/dates do not matter).
+- Every sprint must end with a **demoable** piece of software that can be run, tested, and built on by later sprints.
+- Every task/ticket must be an **atomic, committable** piece of work.
+- Every task/ticket must include **validation**:
+  - Prefer automated tests.
+  - If tests don't make sense, include an explicit alternative (build step, runtime verification, smoke test, etc.).
+- Be exhaustive, clear, and technical. Prefer many small tasks over a few large ones.
+
 ## Output artifact
 
-Write your final plan to:
+Write your plan as Markdown via stdin to:
 
-{plan_path}
+`mm plan write`
 
-Use Markdown. Keep it actionable and broken down into small, committable tickets.
+Example:
+
+```bash
+cat <<'EOF' | mm plan write
+... sprint plan markdown ...
+EOF
+```
+
+Then review what you wrote with:
+
+`mm plan read {plan_id}`
+
+Iterate on the Markdown (rewrite with `mm plan write`) until you're satisfied.
 
 Plan ID: {plan_id}
-"#
+Plan path (for reference): {plan_path}
+"###
     )
 }
 

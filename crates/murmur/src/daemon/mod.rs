@@ -9,7 +9,9 @@ use murmur_core::claims::ClaimRegistry;
 use murmur_core::config::AgentBackend;
 use murmur_core::paths::MurmurPaths;
 use murmur_core::stream::{InputMessage, MessageBody, StreamMessage};
-use murmur_protocol::{AgentChatEvent, AgentCreatedEvent, Event, EVT_AGENT_CHAT, EVT_AGENT_CREATED};
+use murmur_protocol::{
+    AgentChatEvent, AgentCreatedEvent, Event, EVT_AGENT_CHAT, EVT_AGENT_CREATED,
+};
 use tokio::io::{BufReader, BufWriter};
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -23,6 +25,7 @@ mod claude;
 mod issue_backend;
 mod merge;
 mod orchestration;
+mod prompts;
 mod proto;
 mod rpc;
 mod server;
@@ -196,10 +199,7 @@ async fn spawn_agent_without_issue(
     }
 
     // Emit agent created event so TUI can refresh its agent list
-    emit_agent_created_event(
-        shared.as_ref(),
-        &agent_info_from_record(&record, backend),
-    );
+    emit_agent_created_event(shared.as_ref(), &agent_info_from_record(&record, backend));
 
     // NOW spawn the process - agent is already registered
     let mut pending_claude = None;
@@ -209,6 +209,7 @@ async fn spawn_agent_without_issue(
             &agent_id,
             &project,
             &wt.dir,
+            &shared.paths.murmur_dir,
             &shared.paths.socket_path,
             None,
             false,
@@ -360,10 +361,7 @@ async fn spawn_agent_with_kickoff(
     }
 
     // Emit agent created event so TUI can refresh its agent list
-    emit_agent_created_event(
-        shared.as_ref(),
-        &agent_info_from_record(&record, backend),
-    );
+    emit_agent_created_event(shared.as_ref(), &agent_info_from_record(&record, backend));
 
     // NOW spawn the process - agent is already registered
     let mut pending_claude = None;
@@ -373,6 +371,7 @@ async fn spawn_agent_with_kickoff(
             &agent_id,
             &project,
             &wt.dir,
+            &shared.paths.murmur_dir,
             &shared.paths.socket_path,
             None,
             false,
@@ -504,6 +503,7 @@ async fn spawn_claude_agent_process(
     agent_id: &str,
     project: &str,
     worktree_dir: &Path,
+    murmur_dir: &Path,
     socket_path: &Path,
     permissions_allow: Option<&[String]>,
     is_manager: bool,
@@ -582,6 +582,7 @@ async fn spawn_claude_agent_process(
         &settings_json,
     ])
     .env("MURMUR_AGENT_ID", agent_id)
+    .env("MURMUR_DIR", murmur_dir)
     .env("MURMUR_PROJECT", project)
     .env("MURMUR_SOCKET_PATH", socket_path)
     .current_dir(worktree_dir)
@@ -759,22 +760,33 @@ async fn codex_run_turn(
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncBufReadExt as _;
 
-    let (thread_id, project) = {
+    let (thread_id, project, role) = {
         let agents = shared.agents.lock().await;
         let rt = agents.agents.get(agent_id);
         (
             rt.and_then(|rt| rt.codex_thread_id.clone()),
             rt.map(|rt| rt.record.project.clone()).unwrap_or_default(),
+            rt.map(|rt| rt.record.role),
         )
+    };
+
+    let is_manager = matches!(role, Some(AgentRole::Manager));
+    let prompt = if is_manager && thread_id.is_none() {
+        let system_prompt = prompts::build_manager_prompt(&project);
+        format!("{system_prompt}\n\n## User Message\n\n{prompt}")
+    } else {
+        prompt
     };
 
     let (mut child, stdout, pid) = spawn_codex_turn_process(
         agent_id,
         &project,
         worktree_dir,
+        &shared.paths.murmur_dir,
         &shared.paths.socket_path,
         thread_id.as_deref(),
         &prompt,
+        is_manager,
     )
     .await?;
 
@@ -840,14 +852,21 @@ async fn spawn_codex_turn_process(
     agent_id: &str,
     project: &str,
     worktree_dir: &Path,
+    murmur_dir: &Path,
     socket_path: &Path,
     thread_id: Option<&str>,
     prompt: &str,
+    is_manager: bool,
 ) -> anyhow::Result<(tokio::process::Child, tokio::process::ChildStdout, u32)> {
     let mut cmd = tokio::process::Command::new("codex");
     cmd.arg("exec");
     if let Some(socket_dir) = socket_path.parent() {
         cmd.arg("--add-dir").arg(socket_dir);
+        if socket_dir != murmur_dir {
+            cmd.arg("--add-dir").arg(murmur_dir);
+        }
+    } else {
+        cmd.arg("--add-dir").arg(murmur_dir);
     }
     if let Some(thread_id) = thread_id {
         cmd.arg("resume");
@@ -856,6 +875,8 @@ async fn spawn_codex_turn_process(
             "--full-auto",
             "-c",
             r#"model_reasoning_effort="xhigh""#,
+            "-c",
+            "shell_environment_policy.inherit=all",
             "-c",
             "sandbox_workspace_write.network_access=true",
         ]);
@@ -868,18 +889,25 @@ async fn spawn_codex_turn_process(
             "-c",
             r#"model_reasoning_effort="xhigh""#,
             "-c",
+            "shell_environment_policy.inherit=all",
+            "-c",
             "sandbox_workspace_write.network_access=true",
         ]);
         cmd.arg(prompt);
     }
 
     cmd.env("MURMUR_AGENT_ID", agent_id)
+        .env("MURMUR_DIR", murmur_dir)
         .env("MURMUR_PROJECT", project)
         .env("MURMUR_SOCKET_PATH", socket_path)
         .current_dir(worktree_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
+
+    if is_manager {
+        cmd.env("FUGUE_MANAGER", "1").env("FAB_MANAGER", "1");
+    }
 
     let mut child = cmd.spawn().context("spawn codex")?;
     let pid = child.id().ok_or_else(|| anyhow!("codex pid missing"))?;
