@@ -85,6 +85,21 @@ fn default_rules() -> Vec<Rule> {
                 "git clean:*",
             ],
         ),
+        // Deny dangerous murmur commands that could disrupt the system
+        rule(
+            "Bash",
+            Action::Deny,
+            &[
+                // Prevent agents from modifying project configuration
+                "mm project remove:*",
+                "mm project add:*",
+                // Prevent agents from stopping/restarting the daemon
+                "mm server stop:*",
+                "mm server restart:*",
+                // Prevent agents from deleting other agents
+                "mm agent delete:*",
+            ],
+        ),
         rule(
             "Bash",
             Action::Allow,
@@ -247,5 +262,73 @@ allowed_patterns = ["mm:*", "git :*"]
 
         let patterns = load_manager_allowed_patterns(&paths).await.unwrap();
         assert_eq!(patterns, vec!["mm:*".to_owned(), "git :*".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn default_rules_deny_dangerous_mm_commands() {
+        let dir = TempDir::new().unwrap();
+        let paths = test_paths(&dir);
+        let rules = load_rules(&paths, None).await.unwrap();
+
+        // Verify dangerous commands are denied
+        let dangerous_commands = [
+            "mm project remove myproj",
+            "mm project add https://example.com/repo.git",
+            "mm server stop",
+            "mm server restart",
+            "mm agent delete a-123",
+        ];
+
+        for cmd in dangerous_commands {
+            let (action, matched) = murmur_core::permissions::evaluate_rules(
+                &rules,
+                "Bash",
+                &serde_json::json!({"command": cmd}),
+                "/tmp",
+                "/tmp",
+            );
+            assert_eq!(
+                action,
+                murmur_core::permissions::Action::Deny,
+                "should deny: {}",
+                cmd
+            );
+            assert!(matched, "should match a rule: {}", cmd);
+        }
+    }
+
+    #[tokio::test]
+    async fn default_rules_allow_safe_mm_commands() {
+        let dir = TempDir::new().unwrap();
+        let paths = test_paths(&dir);
+        let rules = load_rules(&paths, None).await.unwrap();
+
+        // Verify safe commands are still allowed
+        let safe_commands = [
+            "mm issue list",
+            "mm issue ready --project demo",
+            "mm agent claim 123",
+            "mm agent describe \"working on feature\"",
+            "mm agent done",
+            "mm project status myproj",
+            "mm project list",
+        ];
+
+        for cmd in safe_commands {
+            let (action, matched) = murmur_core::permissions::evaluate_rules(
+                &rules,
+                "Bash",
+                &serde_json::json!({"command": cmd}),
+                "/tmp",
+                "/tmp",
+            );
+            assert_eq!(
+                action,
+                murmur_core::permissions::Action::Allow,
+                "should allow: {}",
+                cmd
+            );
+            assert!(matched, "should match a rule: {}", cmd);
+        }
     }
 }

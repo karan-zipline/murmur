@@ -5,6 +5,9 @@ use ratatui::text::{Line, Span};
 pub const ROLE_BADGE_WIDTH: usize = 3;
 pub const ROLE_BADGE_SPACER_WIDTH: usize = ROLE_BADGE_WIDTH + 1;
 
+/// Maximum number of messages to keep per agent (prevents unbounded memory growth)
+pub const MAX_MESSAGES_PER_AGENT: usize = 1000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedChatLine {
     pub role: ChatRole,
@@ -19,6 +22,12 @@ pub struct ChatBuffer {
     pub scroll_top: usize,
     pub follow_tail: bool,
     pub history_loaded: bool,
+    /// Width used for the last render (for incremental append optimization)
+    pub rendered_width: usize,
+    /// Tool events visibility for the last render
+    pub rendered_show_tool_events: bool,
+    /// Flag indicating buffer needs rewrap on next view (for lazy resize)
+    pub needs_rewrap: bool,
 }
 
 impl ChatBuffer {
@@ -29,27 +38,53 @@ impl ChatBuffer {
             scroll_top: 0,
             follow_tail: true,
             history_loaded: false,
+            rendered_width: 0,
+            rendered_show_tool_events: false,
+            needs_rewrap: false,
         }
     }
 }
 
+/// Merge two sorted message lists using O(n) merge-sort style algorithm.
+/// Both `history` and `existing` are expected to be sorted by ts_ms.
+/// Deduplicates against the last 8 messages in the output.
 pub fn merge_history(history: &[ChatMessage], existing: &[ChatMessage]) -> Vec<ChatMessage> {
-    let mut all = Vec::with_capacity(history.len() + existing.len());
-    all.extend_from_slice(history);
-    all.extend_from_slice(existing);
-    all.sort_by(|a, b| a.ts_ms.cmp(&b.ts_ms));
+    let mut out = Vec::with_capacity(history.len() + existing.len());
 
-    let mut out = Vec::with_capacity(all.len());
-    for msg in all {
+    let mut h_iter = history.iter().peekable();
+    let mut e_iter = existing.iter().peekable();
+
+    loop {
+        // Pick the message with smaller timestamp, or break if both exhausted
+        let next = match (h_iter.peek(), e_iter.peek()) {
+            (Some(h), Some(e)) => {
+                if h.ts_ms <= e.ts_ms {
+                    h_iter.next().cloned()
+                } else {
+                    e_iter.next().cloned()
+                }
+            }
+            (Some(_), None) => h_iter.next().cloned(),
+            (None, Some(_)) => e_iter.next().cloned(),
+            (None, None) => break,
+        };
+
+        let Some(msg) = next else {
+            break;
+        };
+
+        // Deduplicate against last 8 messages
         let is_dup = out
             .iter()
             .rev()
             .take(8)
             .any(|m| is_duplicate_message(m, &msg));
+
         if !is_dup {
             out.push(msg);
         }
     }
+
     out
 }
 
@@ -117,6 +152,50 @@ pub fn rebuild_lines(
         out.extend(render_markdown_message(msg, content_width));
     }
 
+    out
+}
+
+/// Render a single message for incremental append.
+/// Uses existing lines to determine the last visible role for proper spacing.
+fn render_single_message(
+    message: &ChatMessage,
+    width: usize,
+    show_tool_events: bool,
+    existing_lines: &[RenderedChatLine],
+) -> Vec<RenderedChatLine> {
+    let content_width = width.saturating_sub(ROLE_BADGE_SPACER_WIDTH);
+    let mut out = Vec::new();
+
+    // Find the last visible role from existing lines
+    let last_visible_role = existing_lines
+        .iter()
+        .rev()
+        .find(|l| l.show_badge)
+        .map(|l| l.role);
+
+    if message.role == ChatRole::Tool {
+        if show_tool_events {
+            let tool_name = message
+                .tool_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("");
+            out.extend(render_tool_message(message, tool_name, content_width));
+        }
+        return out;
+    }
+
+    // Add separator if previous visible message was not a tool
+    if matches!(last_visible_role, Some(role) if role != ChatRole::Tool) {
+        out.push(RenderedChatLine {
+            role: ChatRole::System,
+            spans: vec![Span::raw("")],
+            show_badge: false,
+        });
+    }
+
+    out.extend(render_markdown_message(message, content_width));
     out
 }
 
@@ -352,8 +431,33 @@ pub fn append_message(
     {
         return;
     }
+
     buffer.messages.push(message.clone());
-    buffer.lines = rebuild_lines(&buffer.messages, width, show_tool_events);
+
+    // Cap messages to prevent unbounded memory growth
+    let needs_rebuild = if buffer.messages.len() > MAX_MESSAGES_PER_AGENT {
+        let excess = buffer.messages.len() - MAX_MESSAGES_PER_AGENT;
+        buffer.messages.drain(0..excess);
+        true // Force rebuild after trimming
+    } else {
+        false
+    };
+
+    // Check if we need a full rebuild or can append incrementally
+    let width_changed = buffer.rendered_width != width;
+    let tool_events_changed = buffer.rendered_show_tool_events != show_tool_events;
+
+    if needs_rebuild || width_changed || tool_events_changed || buffer.lines.is_empty() {
+        // Full rebuild needed due to width, settings change, or message cap
+        buffer.lines = rebuild_lines(&buffer.messages, width, show_tool_events);
+        buffer.rendered_width = width;
+        buffer.rendered_show_tool_events = show_tool_events;
+    } else {
+        // Incremental append - only render the new message
+        let new_lines = render_single_message(&message, width, show_tool_events, &buffer.lines);
+        buffer.lines.extend(new_lines);
+    }
+
     clamp_scroll_after_content_change(buffer, viewport_height);
 }
 
@@ -364,7 +468,15 @@ pub fn rewrap(
     show_tool_events: bool,
 ) {
     buffer.lines = rebuild_lines(&buffer.messages, width, show_tool_events);
+    buffer.rendered_width = width;
+    buffer.rendered_show_tool_events = show_tool_events;
+    buffer.needs_rewrap = false;
     clamp_scroll_after_content_change(buffer, viewport_height);
+}
+
+/// Mark a buffer as needing rewrap on next view (for lazy resize optimization)
+pub fn mark_needs_rewrap(buffer: &mut ChatBuffer) {
+    buffer.needs_rewrap = true;
 }
 
 pub fn scroll_up(buffer: &mut ChatBuffer, lines: usize) {

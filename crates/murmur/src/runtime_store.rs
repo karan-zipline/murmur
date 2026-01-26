@@ -10,7 +10,13 @@ pub async fn save_agents(
         .await
         .with_context(|| format!("create runtime dir: {}", paths.runtime_dir.display()))?;
 
-    let tmp = paths.runtime_dir.join("agents.json.tmp");
+    // Use unique temp filename to prevent race conditions when multiple
+    // concurrent saves occur (e.g., two agents completing simultaneously)
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp = paths.runtime_dir.join(format!("agents.json.{}.tmp", nonce));
     let dest = paths.runtime_dir.join("agents.json");
 
     let data = serde_json::to_vec_pretty(agents_json).context("serialize agents runtime json")?;

@@ -143,14 +143,8 @@ fn draw_agents(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect
             };
             line.push(Span::styled(format!("{:<6}", agent.id), id_style));
 
-            let has_perm = model
-                .pending_permissions
-                .iter()
-                .any(|p| p.agent_id == agent.id);
-            let has_question = model
-                .pending_questions
-                .iter()
-                .any(|q| q.agent_id == agent.id);
+            let has_perm = model.agents_with_permissions.contains(&agent.id);
+            let has_question = model.agents_with_questions.contains(&agent.id);
             if has_perm {
                 line.push(Span::raw(" "));
                 line.push(Span::styled(
@@ -954,7 +948,7 @@ mod tests {
             8,
             false,
         );
-        model.chats.insert("a-1".to_owned(), buf);
+        model.chats.put("a-1".to_owned(), buf);
 
         terminal.draw(|f| draw(f, &model)).unwrap();
 

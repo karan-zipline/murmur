@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+lru = "0.12"
 axum = { version = "0.7", default-features = false, features = ["tokio", "http1", "query"] }
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"

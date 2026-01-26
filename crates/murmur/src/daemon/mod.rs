@@ -1114,7 +1114,21 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
 
 fn is_process_running(pid: u32) -> bool {
     // Check if process exists by checking /proc/<pid> on Linux
-    std::path::Path::new(&format!("/proc/{pid}")).exists()
+    let proc_path = format!("/proc/{pid}");
+    if !std::path::Path::new(&proc_path).exists() {
+        return false;
+    }
+
+    // Verify this is actually an agent process (claude or codex) by checking cmdline
+    // This prevents PID reuse from causing stale agents to be rehydrated
+    let cmdline_path = format!("/proc/{pid}/cmdline");
+    match std::fs::read_to_string(&cmdline_path) {
+        Ok(cmdline) => {
+            let cmdline_lower = cmdline.to_lowercase();
+            cmdline_lower.contains("claude") || cmdline_lower.contains("codex")
+        }
+        Err(_) => false,
+    }
 }
 
 fn project_dir(paths: &MurmurPaths, name: &str) -> std::path::PathBuf {

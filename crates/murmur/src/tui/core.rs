@@ -1,9 +1,14 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashSet};
+use std::num::NonZeroUsize;
 
+use lru::LruCache;
 use murmur_protocol::{AgentInfo, PermissionBehavior, PermissionRequest, UserQuestion};
 
 use super::chat::{self, ChatBuffer};
 use super::editor::Editor;
+
+/// Maximum number of agent chat buffers to keep in cache
+const MAX_CACHED_AGENTS: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -74,7 +79,7 @@ pub struct Model {
 
     pub agents: Vec<AgentInfo>,
     pub selected_agent: usize,
-    pub chats: HashMap<String, ChatBuffer>,
+    pub chats: LruCache<String, ChatBuffer>,
     pub editor: Editor,
     pub input_context: InputContext,
     pub commit_count: u32,
@@ -86,8 +91,16 @@ pub struct Model {
     pub pending_questions: Vec<UserQuestion>,
     pub question_draft: Option<QuestionDraft>,
 
+    /// Index of agent IDs that have pending permissions (for O(1) lookup)
+    pub agents_with_permissions: HashSet<String>,
+    /// Index of agent IDs that have pending questions (for O(1) lookup)
+    pub agents_with_questions: HashSet<String>,
+
     pub show_tool_events: bool,
     pub status: Option<String>,
+
+    /// Dirty flag for render optimization - only draw when true
+    pub dirty: bool,
 }
 
 impl Model {
@@ -104,7 +117,7 @@ impl Model {
             connection: ConnectionState::Connecting,
             agents: Vec::new(),
             selected_agent: 0,
-            chats: HashMap::new(),
+            chats: LruCache::new(NonZeroUsize::new(MAX_CACHED_AGENTS).unwrap()),
             editor: Editor::new(),
             input_context: InputContext::Chat,
             commit_count: 0,
@@ -115,8 +128,11 @@ impl Model {
             pending_permissions: Vec::new(),
             pending_questions: Vec::new(),
             question_draft: None,
+            agents_with_permissions: HashSet::new(),
+            agents_with_questions: HashSet::new(),
             show_tool_events: false,
             status: None,
+            dirty: true, // Start dirty to ensure first render
         }
     }
 
@@ -126,7 +142,7 @@ impl Model {
 
     pub fn selected_chat(&self) -> Option<&ChatBuffer> {
         let agent = self.selected_agent()?;
-        self.chats.get(&agent.id)
+        self.chats.peek(&agent.id)
     }
 
     pub fn pending_permission_for_selected(&self) -> Option<&PermissionRequest> {
@@ -289,6 +305,11 @@ pub enum Effect {
 pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
     let mut effects = Vec::new();
 
+    // Mark dirty for most messages (Tick handled specially below)
+    if !matches!(msg, Msg::Tick { .. }) {
+        model.dirty = true;
+    }
+
     match msg {
         Msg::Init => {
             model.connection = ConnectionState::Connecting;
@@ -308,16 +329,36 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
             model.height = height;
 
             let (chat_width, chat_height) = chat_viewport(&model);
-            for buf in model.chats.values_mut() {
-                chat::rewrap(buf, chat_width, chat_height, model.show_tool_events);
+            let selected_id = model.selected_agent().map(|a| a.id.clone());
+
+            // Only rewrap the selected buffer immediately; mark others as needing rewrap
+            for (id, buf) in model.chats.iter_mut() {
+                if Some(id.as_str()) == selected_id.as_deref() {
+                    chat::rewrap(buf, chat_width, chat_height, model.show_tool_events);
+                } else {
+                    chat::mark_needs_rewrap(buf);
+                }
             }
         }
         Msg::Tick { now_ms } => {
+            // Check if spinner frame changed (only set dirty if needed)
+            let old_frame = (model.now_ms / 120) % 10;
+            let new_frame = (now_ms / 120) % 10;
+            let has_running_agents = model
+                .agents
+                .iter()
+                .any(|a| matches!(a.state, murmur_protocol::AgentState::Running));
+
+            if old_frame != new_frame && has_running_agents {
+                model.dirty = true;
+            }
+
             model.now_ms = now_ms;
             if model.next_refresh_ms == 0 && model.now_ms > 0 {
                 model.next_refresh_ms = model.now_ms.saturating_add(5_000);
             } else if model.now_ms > 0 && model.now_ms >= model.next_refresh_ms {
                 model.next_refresh_ms = model.now_ms.saturating_add(5_000);
+                effects.push(Effect::FetchAgentList);
                 effects.push(Effect::FetchStats { project: None });
                 effects.push(Effect::FetchCommitList {
                     project: None,
@@ -340,6 +381,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                     return (model, effects);
                 }
 
+                model.dirty = true; // Reconnecting changes state
                 model.connection = ConnectionState::Connecting;
                 effects.push(Effect::ReconnectStream);
 
@@ -439,7 +481,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                             't' => {
                                 model.show_tool_events = !model.show_tool_events;
                                 let (chat_width, chat_height) = chat_viewport(&model);
-                                for buf in model.chats.values_mut() {
+                                for (_, buf) in model.chats.iter_mut() {
                                     chat::rewrap(
                                         buf,
                                         chat_width,
@@ -489,6 +531,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                         model.selected_agent = model.selected_agent.saturating_sub(1);
                         if model.selected_agent != old {
                             queue_chat_history_if_needed(&model, &mut effects);
+                            rewrap_selected_if_needed(&mut model);
                             sync_question_draft(&mut model);
                         }
                     } else if matches!(model.focus, Focus::ChatView) {
@@ -510,6 +553,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                             (model.selected_agent + 1).min(model.agents.len() - 1);
                         if model.selected_agent != old {
                             queue_chat_history_if_needed(&model, &mut effects);
+                            rewrap_selected_if_needed(&mut model);
                             sync_question_draft(&mut model);
                         }
                     } else if matches!(model.focus, Focus::ChatView) {
@@ -641,8 +685,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                                 let (chat_width, chat_height) = chat_viewport(&model);
                                 let buf = model
                                     .chats
-                                    .entry(agent_id.clone())
-                                    .or_insert_with(ChatBuffer::new);
+                                    .get_or_insert_mut(agent_id.clone(), ChatBuffer::new);
                                 chat::append_message(
                                     buf,
                                     murmur_protocol::ChatMessage {
@@ -789,10 +832,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
         }
         Msg::AgentChatReceived(evt) => {
             let (chat_width, chat_height) = chat_viewport(&model);
-            let buf = model
-                .chats
-                .entry(evt.agent_id)
-                .or_insert_with(ChatBuffer::new);
+            let buf = model.chats.get_or_insert_mut(evt.agent_id, ChatBuffer::new);
             chat::append_message(
                 buf,
                 evt.message,
@@ -804,7 +844,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
         Msg::AgentChatHistoryLoaded { agent_id, result } => match result {
             Ok(history) => {
                 let (chat_width, chat_height) = chat_viewport(&model);
-                let buf = model.chats.entry(agent_id).or_insert_with(ChatBuffer::new);
+                let buf = model.chats.get_or_insert_mut(agent_id, ChatBuffer::new);
                 let merged = chat::merge_history(&history, &buf.messages);
                 buf.messages = merged;
                 buf.history_loaded = true;
@@ -819,7 +859,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
             Err(err) => {
                 model.status = Some(err.clone());
                 let (chat_width, chat_height) = chat_viewport(&model);
-                let buf = model.chats.entry(agent_id).or_insert_with(ChatBuffer::new);
+                let buf = model.chats.get_or_insert_mut(agent_id, ChatBuffer::new);
                 chat::append_message(
                     buf,
                     murmur_protocol::ChatMessage {
@@ -865,17 +905,20 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
         Msg::PermissionListLoaded(result) => match result {
             Ok(requests) => {
                 model.pending_permissions = requests;
+                rebuild_permission_index(&mut model);
             }
             Err(err) => model.status = Some(err),
         },
         Msg::PermissionRequested(req) => {
             if !model.pending_permissions.iter().any(|p| p.id == req.id) {
+                model.agents_with_permissions.insert(req.agent_id.clone());
                 model.pending_permissions.push(req);
             }
         }
         Msg::PermissionRespondFinished { id, result } => match result {
             Ok(()) => {
                 model.pending_permissions.retain(|p| p.id != id);
+                rebuild_permission_index(&mut model);
             }
             Err(err) => {
                 model.status = Some(err);
@@ -885,12 +928,14 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
         Msg::QuestionListLoaded(result) => match result {
             Ok(requests) => {
                 model.pending_questions = requests;
+                rebuild_question_index(&mut model);
                 sync_question_draft(&mut model);
             }
             Err(err) => model.status = Some(err),
         },
         Msg::QuestionRequested(req) => {
             if !model.pending_questions.iter().any(|q| q.id == req.id) {
+                model.agents_with_questions.insert(req.agent_id.clone());
                 model.pending_questions.push(req);
                 sync_question_draft(&mut model);
             }
@@ -898,6 +943,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
         Msg::QuestionRespondFinished { id, result } => match result {
             Ok(()) => {
                 model.pending_questions.retain(|q| q.id != id);
+                rebuild_question_index(&mut model);
                 if model
                     .question_draft
                     .as_ref()
@@ -925,7 +971,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
             Ok(()) => {
                 effects.push(Effect::FetchAgentList);
                 model.status = None;
-                model.chats.remove(&plan_id);
+                model.chats.pop(&plan_id);
             }
             Err(err) => model.status = Some(err),
         },
@@ -1175,7 +1221,10 @@ fn input_panel_height(model: &Model, max_height: usize, inner_width: usize) -> u
 
     // Allow input panel to take up to 60% of available height
     let max_inner_lines = ((max_height as f32 * 0.6) as usize).max(3);
-    let inner = model.editor.visual_lines(inner_width).clamp(1, max_inner_lines);
+    let inner = model
+        .editor
+        .visual_lines(inner_width)
+        .clamp(1, max_inner_lines);
     let desired = (inner + 2).max(3);
     let max_total = max_height.saturating_sub(3).max(3);
     desired.min(max_total)
@@ -1185,9 +1234,10 @@ fn queue_chat_history_if_needed(model: &Model, effects: &mut Vec<Effect>) {
     let Some(agent_id) = model.selected_agent().map(|a| a.id.clone()) else {
         return;
     };
+    // Use peek to avoid mutating LRU order during read
     let needs = model
         .chats
-        .get(&agent_id)
+        .peek(&agent_id)
         .map(|c| !c.history_loaded)
         .unwrap_or(true);
     if needs {
@@ -1195,6 +1245,44 @@ fn queue_chat_history_if_needed(model: &Model, effects: &mut Vec<Effect>) {
             agent_id,
             limit: 200,
         });
+    }
+}
+
+/// Rewrap the selected agent's chat buffer if it was marked as needing rewrap
+fn rewrap_selected_if_needed(model: &mut Model) {
+    let Some(agent_id) = model.selected_agent().map(|a| a.id.clone()) else {
+        return;
+    };
+
+    // Use peek first to check if rewrap is needed (avoids borrowing issues)
+    let needs_rewrap = model
+        .chats
+        .peek(&agent_id)
+        .map(|c| c.needs_rewrap)
+        .unwrap_or(false);
+
+    if needs_rewrap {
+        let (chat_width, chat_height) = chat_viewport(model);
+        let show_tool_events = model.show_tool_events;
+        if let Some(buf) = model.chats.get_mut(&agent_id) {
+            chat::rewrap(buf, chat_width, chat_height, show_tool_events);
+        }
+    }
+}
+
+/// Rebuild the permission index from the pending_permissions list
+fn rebuild_permission_index(model: &mut Model) {
+    model.agents_with_permissions.clear();
+    for p in &model.pending_permissions {
+        model.agents_with_permissions.insert(p.agent_id.clone());
+    }
+}
+
+/// Rebuild the question index from the pending_questions list
+fn rebuild_question_index(model: &mut Model) {
+    model.agents_with_questions.clear();
+    for q in &model.pending_questions {
+        model.agents_with_questions.insert(q.agent_id.clone());
     }
 }
 
@@ -1499,7 +1587,9 @@ mod tests {
         let (model, effects) = reduce(model, Msg::Paste("line1\nline2\nline3".to_owned()));
 
         // Should NOT have submitted (no SendAgentMessage effect)
-        assert!(!effects.iter().any(|e| matches!(e, Effect::SendAgentMessage { .. })));
+        assert!(!effects
+            .iter()
+            .any(|e| matches!(e, Effect::SendAgentMessage { .. })));
 
         // Should still be in input mode
         assert_eq!(model.mode, Mode::Input);
@@ -1584,7 +1674,7 @@ mod tests {
             }]
         );
 
-        let buf = model.chats.get("a-1").unwrap();
+        let buf = model.chats.peek("a-1").unwrap();
         assert!(buf
             .messages
             .iter()
@@ -1605,7 +1695,7 @@ mod tests {
             },
         );
         assert_eq!(model.status.as_deref(), Some("nope"));
-        let buf = model.chats.get("a-1").unwrap();
+        let buf = model.chats.peek("a-1").unwrap();
         assert!(buf.messages.iter().any(|m| {
             matches!(m.role, murmur_protocol::ChatRole::System) && m.content.contains("send failed")
         }));
@@ -1623,6 +1713,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
+                Effect::FetchAgentList,
                 Effect::FetchStats { project: None },
                 Effect::FetchCommitList {
                     project: None,
