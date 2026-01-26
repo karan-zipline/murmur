@@ -33,7 +33,6 @@ pub async fn load_agents(paths: &MurmurPaths) -> anyhow::Result<Vec<AgentInfo>> 
     let data = tokio::fs::read_to_string(&path)
         .await
         .with_context(|| format!("read {}", path.display()))?;
-    let infos: Vec<AgentInfo> =
-        serde_json::from_str(&data).with_context(|| "parse agents.json")?;
+    let infos: Vec<AgentInfo> = serde_json::from_str(&data).with_context(|| "parse agents.json")?;
     Ok(infos)
 }

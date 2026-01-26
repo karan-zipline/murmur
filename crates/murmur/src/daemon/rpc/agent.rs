@@ -22,11 +22,9 @@ use super::super::merge::{
     MergeAttempt, PullRequestAttempt,
 };
 use super::super::{
-    agent_info_from_record, cleanup_agent_runtime, emit_agent_chat_event,
-    emit_agent_deleted_event,
+    agent_info_from_record, cleanup_agent_runtime, emit_agent_chat_event, emit_agent_deleted_event,
     issue_backend_for_project, mark_issue_completed, now_ms, persist_agents_runtime,
-    release_claims_for_agent, spawn_agent, to_proto_chat_message,
-    SharedState,
+    release_claims_for_agent, spawn_agent, to_proto_chat_message, SharedState,
 };
 use super::error_response;
 
