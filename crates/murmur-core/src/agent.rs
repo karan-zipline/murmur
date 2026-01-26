@@ -15,6 +15,7 @@ pub enum AgentRole {
 pub enum AgentState {
     Starting,
     Running,
+    Idle,
     NeedsResolution,
     Exited,
     Aborted,
@@ -55,6 +56,8 @@ pub enum AgentEvent<'a> {
     Described { description: &'a str },
     Exited { code: Option<i32> },
     Aborted { by: &'a str },
+    BecameIdle,
+    ResumedFromIdle,
 }
 
 impl AgentRecord {
@@ -118,6 +121,12 @@ impl AgentRecord {
                 next.pid = None;
                 next.exit_reason = Some(AgentExitReason::Aborted);
                 next.state = AgentState::Aborted;
+            }
+            AgentEvent::BecameIdle => {
+                next.state = AgentState::Idle;
+            }
+            AgentEvent::ResumedFromIdle => {
+                next.state = AgentState::Running;
             }
         }
 
@@ -302,5 +311,110 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].content, "2");
         assert_eq!(got[1].content, "3");
+    }
+
+    #[test]
+    fn agent_transitions_running_to_idle() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100);
+        assert_eq!(a.state, AgentState::Running);
+
+        let b = a.apply_event(AgentEvent::BecameIdle, 1200);
+        assert_eq!(b.state, AgentState::Idle);
+        assert_eq!(b.pid, Some(123)); // pid preserved when idle
+        assert_eq!(b.updated_at_ms, 1200);
+    }
+
+    #[test]
+    fn agent_transitions_idle_to_running() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100)
+        .apply_event(AgentEvent::BecameIdle, 1200);
+        assert_eq!(a.state, AgentState::Idle);
+
+        let b = a.apply_event(AgentEvent::ResumedFromIdle, 1300);
+        assert_eq!(b.state, AgentState::Running);
+        assert_eq!(b.pid, Some(123)); // pid preserved
+        assert_eq!(b.updated_at_ms, 1300);
+    }
+
+    #[test]
+    fn agent_transitions_idle_to_exited() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100)
+        .apply_event(AgentEvent::BecameIdle, 1200);
+        assert_eq!(a.state, AgentState::Idle);
+
+        let b = a.apply_event(AgentEvent::Exited { code: Some(0) }, 1300);
+        assert_eq!(b.state, AgentState::Exited);
+        assert_eq!(b.pid, None);
+        assert_eq!(b.exit_code, Some(0));
+        assert_eq!(b.exit_reason, Some(AgentExitReason::Exited));
+        assert_eq!(b.updated_at_ms, 1300);
+    }
+
+    #[test]
+    fn agent_transitions_idle_to_aborted() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100)
+        .apply_event(AgentEvent::BecameIdle, 1200);
+        assert_eq!(a.state, AgentState::Idle);
+
+        let b = a.apply_event(AgentEvent::Aborted { by: "user" }, 1300);
+        assert_eq!(b.state, AgentState::Aborted);
+        assert_eq!(b.pid, None);
+        assert_eq!(b.exit_reason, Some(AgentExitReason::Aborted));
+        assert_eq!(b.updated_at_ms, 1300);
+    }
+
+    #[test]
+    fn agent_state_idle_serialization_roundtrip() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100)
+        .apply_event(AgentEvent::BecameIdle, 1200);
+        assert_eq!(a.state, AgentState::Idle);
+
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("\"idle\""));
+
+        let b: AgentRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(b.state, AgentState::Idle);
+        assert_eq!(b.id, a.id);
+        assert_eq!(b.pid, a.pid);
     }
 }
