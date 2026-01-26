@@ -79,10 +79,41 @@ impl Editor {
     pub fn visual_lines(&self) -> usize {
         visual_lines(&self.buffer)
     }
+
+    pub fn visual_lines_wrapped(&self, width: usize) -> usize {
+        visual_lines_wrapped(&self.buffer, width)
+    }
 }
 
 pub fn visual_lines(buffer: &str) -> usize {
     buffer.split('\n').count().max(1)
+}
+
+pub fn visual_lines_wrapped(buffer: &str, width: usize) -> usize {
+    if width == 0 {
+        return visual_lines(buffer);
+    }
+
+    let mut total: usize = 0;
+    let mut iter = buffer.split('\n').peekable();
+    while let Some(line) = iter.next() {
+        let is_last = iter.peek().is_none();
+        let mut display_width = unicode_width::UnicodeWidthStr::width(line);
+        if is_last {
+            display_width = display_width.saturating_add(1);
+        }
+        total = total.saturating_add(rows_for_width(display_width, width));
+    }
+
+    total.max(1)
+}
+
+fn rows_for_width(display_width: usize, width: usize) -> usize {
+    if width == 0 || display_width == 0 {
+        return 1;
+    }
+
+    (display_width.saturating_sub(1) / width).saturating_add(1)
 }
 
 #[cfg(test)]
@@ -107,6 +138,14 @@ mod tests {
         assert_eq!(e.visual_lines(), 1);
         e.insert_newline();
         assert_eq!(e.visual_lines(), 2);
+    }
+
+    #[test]
+    fn visual_lines_wrapped_counts_wrapped_rows() {
+        assert_eq!(visual_lines_wrapped("abcd", 4), 2); // includes cursor
+        assert_eq!(visual_lines_wrapped("abcd", 5), 1);
+        assert_eq!(visual_lines_wrapped("ab\ncd", 2), 3);
+        assert_eq!(visual_lines_wrapped("", 10), 1);
     }
 
     #[test]

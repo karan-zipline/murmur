@@ -304,7 +304,8 @@ fn truncate_chars(input: &str, max: usize) -> String {
 
 fn draw_chat(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect) {
     if matches!(model.mode, Mode::Input) {
-        let input_height = input_panel_height(model, area.height);
+        let input_inner_width = area.width.saturating_sub(2);
+        let input_height = input_panel_height(model, input_inner_width, area.height);
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(input_height)])
@@ -317,8 +318,8 @@ fn draw_chat(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect) 
     draw_chat_panel(frame, model, area);
 }
 
-fn input_panel_height(model: &Model, max_height: u16) -> u16 {
-    let inner = (model.editor.visual_lines() as u16).clamp(1, 6);
+fn input_panel_height(model: &Model, input_width: u16, max_height: u16) -> u16 {
+    let inner = (model.editor.visual_lines_wrapped(input_width as usize) as u16).clamp(1, 6);
     let desired = inner.saturating_add(2).max(3);
     let max_total = max_height.saturating_sub(3).max(3);
     desired.min(max_total)
@@ -441,7 +442,16 @@ fn draw_input_panel(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout:
 
     let mut content = model.editor.buffer.clone();
     content.push('█');
-    frame.render_widget(Paragraph::new(content).wrap(Wrap { trim: false }), inner);
+    let total_lines = model.editor.visual_lines_wrapped(inner.width as usize);
+    let scroll_y = total_lines
+        .saturating_sub(inner.height as usize)
+        .min(u16::MAX as usize) as u16;
+    frame.render_widget(
+        Paragraph::new(content)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_y, 0)),
+        inner,
+    );
 }
 
 fn role_badge(role: murmur_protocol::ChatRole) -> (&'static str, Style) {
@@ -937,6 +947,32 @@ mod tests {
             .unwrap();
 
         model.editor.buffer = "hello\nworld".to_owned();
+        terminal.draw(|f| draw(f, &model)).unwrap();
+        let y2 = buffer_text(&mut terminal)
+            .lines()
+            .position(|l| l.contains("Input"))
+            .unwrap();
+
+        assert!(y2 < y1);
+    }
+
+    #[test]
+    fn input_panel_height_grows_with_wrapped_buffer() {
+        let backend = ratatui::backend::TestBackend::new(80, 14);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+        let mut model = Model::new();
+        model.mode = Mode::Input;
+        model.focus = Focus::InputLine;
+
+        model.editor.buffer = "hello".to_owned();
+        terminal.draw(|f| draw(f, &model)).unwrap();
+        let y1 = buffer_text(&mut terminal)
+            .lines()
+            .position(|l| l.contains("Input"))
+            .unwrap();
+
+        model.editor.buffer = "a".repeat(60);
         terminal.draw(|f| draw(f, &model)).unwrap();
         let y2 = buffer_text(&mut terminal)
             .lines()

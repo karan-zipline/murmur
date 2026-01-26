@@ -1141,18 +1141,18 @@ fn chat_viewport(model: &Model) -> (usize, usize) {
     let chat_width = right_w.saturating_sub(2);
 
     let main_height = height.saturating_sub(2);
-    let input_height = input_panel_height(model, main_height);
+    let input_height = input_panel_height(model, chat_width, main_height);
     let chat_height = main_height.saturating_sub(input_height).saturating_sub(2);
 
     (chat_width, chat_height)
 }
 
-fn input_panel_height(model: &Model, max_height: usize) -> usize {
+fn input_panel_height(model: &Model, input_width: usize, max_height: usize) -> usize {
     if !matches!(model.mode, Mode::Input) {
         return 0;
     }
 
-    let inner = model.editor.visual_lines().clamp(1, 6);
+    let inner = model.editor.visual_lines_wrapped(input_width).clamp(1, 6);
     let desired = (inner + 2).max(3);
     let max_total = max_height.saturating_sub(3).max(3);
     desired.min(max_total)
