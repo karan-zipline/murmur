@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result};
 use crossterm::event::{Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -29,6 +30,7 @@ impl TerminalGuard {
         execute!(
             stdout,
             EnterAlternateScreen,
+            EnableBracketedPaste,
             terminal::Clear(terminal::ClearType::All)
         )
         .context("enter alt screen")?;
@@ -47,7 +49,7 @@ impl TerminalGuard {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = execute!(self.stdout, LeaveAlternateScreen);
+        let _ = execute!(self.stdout, DisableBracketedPaste, LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
 }
@@ -194,6 +196,7 @@ fn spawn_input_pump(tx: mpsc::UnboundedSender<Msg>, shutdown: Arc<AtomicBool>) {
 
             let msg = match evt {
                 CEvent::Key(key) => map_key(key).map(Msg::Action),
+                CEvent::Paste(text) => Some(Msg::Paste(text)),
                 CEvent::Resize(w, h) => Some(Msg::Resize {
                     width: w,
                     height: h,

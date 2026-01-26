@@ -304,7 +304,9 @@ fn truncate_chars(input: &str, max: usize) -> String {
 
 fn draw_chat(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect) {
     if matches!(model.mode, Mode::Input) {
-        let input_height = input_panel_height(model, area.height);
+        // Calculate inner width (area width minus borders)
+        let inner_width = area.width.saturating_sub(2) as usize;
+        let input_height = input_panel_height(model, area.height, inner_width);
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(input_height)])
@@ -317,9 +319,33 @@ fn draw_chat(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect) 
     draw_chat_panel(frame, model, area);
 }
 
-fn input_panel_height(model: &Model, max_height: u16) -> u16 {
-    let inner = (model.editor.visual_lines() as u16).clamp(1, 6);
-    let desired = inner.saturating_add(2).max(3);
+fn input_panel_height(model: &Model, max_height: u16, inner_width: usize) -> u16 {
+    // Calculate visual lines accounting for text wrapping
+    let visual = if inner_width > 0 {
+        // Calculate wrapped lines based on available width
+        let base_lines = model.editor.visual_lines(inner_width);
+        // If the cursor would push us to a new line, account for it
+        let last_line_len = model
+            .editor
+            .buffer
+            .rsplit('\n')
+            .next()
+            .map(|s| s.chars().count())
+            .unwrap_or(0);
+        if last_line_len + 1 > inner_width && (last_line_len + 1) % inner_width == 1 {
+            base_lines + 1
+        } else {
+            base_lines
+        }
+    } else {
+        model.editor.visual_lines(0)
+    };
+
+    // Allow input panel to take up to 60% of available height, but always leave
+    // at least 3 lines for the chat panel
+    let max_inner_lines = ((max_height as f32 * 0.6) as u16).max(3);
+    let inner = (visual as u16).clamp(1, max_inner_lines);
+    let desired = inner.saturating_add(2).max(3); // +2 for borders
     let max_total = max_height.saturating_sub(3).max(3);
     desired.min(max_total)
 }
@@ -441,7 +467,25 @@ fn draw_input_panel(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout:
 
     let mut content = model.editor.buffer.clone();
     content.push('█');
-    frame.render_widget(Paragraph::new(content).wrap(Wrap { trim: false }), inner);
+
+    // Calculate total visual lines after wrapping
+    let inner_width = inner.width as usize;
+    let total_lines = super::editor::visual_lines(&content, inner_width);
+    let visible_lines = inner.height as usize;
+
+    // Scroll to keep cursor (at end) visible
+    let scroll_offset = if total_lines > visible_lines {
+        (total_lines - visible_lines) as u16
+    } else {
+        0
+    };
+
+    frame.render_widget(
+        Paragraph::new(content)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_offset, 0)),
+        inner,
+    );
 }
 
 fn role_badge(role: murmur_protocol::ChatRole) -> (&'static str, Style) {

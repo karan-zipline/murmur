@@ -190,6 +190,8 @@ pub enum Msg {
         now_ms: u64,
     },
     Action(Action),
+    /// Pasted text from clipboard (via bracketed paste mode)
+    Paste(String),
 
     AgentListLoaded(Result<Vec<AgentInfo>, String>),
     AgentCreated(murmur_protocol::AgentCreatedEvent),
@@ -610,6 +612,12 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                         return (model, effects);
                     }
 
+                    // Only enter chat input mode if an agent is selected
+                    if model.selected_agent().is_none() {
+                        model.status = Some("No agent selected".to_owned());
+                        return (model, effects);
+                    }
+
                     model.mode = Mode::Input;
                     model.focus = Focus::InputLine;
                     model.input_context = InputContext::Chat;
@@ -726,6 +734,19 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                 }
             }
         },
+        Msg::Paste(text) => {
+            // Handle pasted text - insert all characters including newlines
+            // without triggering submit
+            if matches!(model.mode, Mode::Input) {
+                for ch in text.chars() {
+                    if ch == '\n' || ch == '\r' {
+                        model.editor.insert_newline();
+                    } else if !ch.is_control() {
+                        model.editor.insert_char(ch);
+                    }
+                }
+            }
+        }
         Msg::AgentListLoaded(result) => match result {
             Ok(agents) => {
                 let prev_selected_id = model.selected_agent().map(|a| a.id.clone());
@@ -1141,18 +1162,20 @@ fn chat_viewport(model: &Model) -> (usize, usize) {
     let chat_width = right_w.saturating_sub(2);
 
     let main_height = height.saturating_sub(2);
-    let input_height = input_panel_height(model, main_height);
+    let input_height = input_panel_height(model, main_height, chat_width);
     let chat_height = main_height.saturating_sub(input_height).saturating_sub(2);
 
     (chat_width, chat_height)
 }
 
-fn input_panel_height(model: &Model, max_height: usize) -> usize {
+fn input_panel_height(model: &Model, max_height: usize, inner_width: usize) -> usize {
     if !matches!(model.mode, Mode::Input) {
         return 0;
     }
 
-    let inner = model.editor.visual_lines().clamp(1, 6);
+    // Allow input panel to take up to 60% of available height
+    let max_inner_lines = ((max_height as f32 * 0.6) as usize).max(3);
+    let inner = model.editor.visual_lines(inner_width).clamp(1, max_inner_lines);
     let desired = (inner + 2).max(3);
     let max_total = max_height.saturating_sub(3).max(3);
     desired.min(max_total)
@@ -1406,7 +1429,24 @@ mod tests {
 
     #[test]
     fn enter_and_exit_input_mode_updates_focus() {
-        let model = Model::new();
+        let mut model = Model::new();
+        // Must have an agent selected to enter chat input mode
+        model.agents = vec![AgentInfo {
+            id: "a-1".to_owned(),
+            project: "p".to_owned(),
+            role: murmur_protocol::AgentRole::Coding,
+            issue_id: "ISSUE-1".to_owned(),
+            state: murmur_protocol::AgentState::Running,
+            backend: None,
+            description: None,
+            worktree_dir: "/tmp".to_owned(),
+            pid: None,
+            exit_code: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        }];
+        model.selected_agent = 0;
+
         let (model, _effects) = reduce(model, Msg::Action(Action::Enter));
         assert_eq!(model.mode, Mode::Input);
         assert_eq!(model.focus, Focus::InputLine);
@@ -1416,6 +1456,56 @@ mod tests {
         assert_eq!(model.mode, Mode::Normal);
         assert_eq!(model.focus, Focus::ChatView);
         model.validate().unwrap();
+    }
+
+    #[test]
+    fn enter_input_mode_blocked_without_agent() {
+        let model = Model::new();
+        assert!(model.agents.is_empty());
+
+        let (model, _effects) = reduce(model, Msg::Action(Action::Enter));
+        // Should NOT enter input mode
+        assert_eq!(model.mode, Mode::Normal);
+        // Should show error status
+        assert!(model.status.is_some());
+        assert!(model.status.as_ref().unwrap().contains("No agent"));
+    }
+
+    #[test]
+    fn paste_inserts_text_with_newlines_without_submitting() {
+        let mut model = Model::new();
+        // Add an agent so we can enter input mode
+        model.agents = vec![AgentInfo {
+            id: "a-1".to_owned(),
+            project: "p".to_owned(),
+            role: murmur_protocol::AgentRole::Coding,
+            issue_id: "ISSUE-1".to_owned(),
+            state: murmur_protocol::AgentState::Running,
+            backend: None,
+            description: None,
+            worktree_dir: "/tmp".to_owned(),
+            pid: None,
+            exit_code: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        }];
+        model.selected_agent = 0;
+
+        // Enter input mode
+        let (model, _) = reduce(model, Msg::Action(Action::Enter));
+        assert_eq!(model.mode, Mode::Input);
+
+        // Paste multi-line text
+        let (model, effects) = reduce(model, Msg::Paste("line1\nline2\nline3".to_owned()));
+
+        // Should NOT have submitted (no SendAgentMessage effect)
+        assert!(!effects.iter().any(|e| matches!(e, Effect::SendAgentMessage { .. })));
+
+        // Should still be in input mode
+        assert_eq!(model.mode, Mode::Input);
+
+        // Buffer should contain the pasted text with newlines
+        assert_eq!(model.editor.buffer, "line1\nline2\nline3");
     }
 
     #[test]

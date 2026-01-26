@@ -76,13 +76,30 @@ impl Editor {
         Some(msg)
     }
 
-    pub fn visual_lines(&self) -> usize {
-        visual_lines(&self.buffer)
+    pub fn visual_lines(&self, width: usize) -> usize {
+        visual_lines(&self.buffer, width)
     }
 }
 
-pub fn visual_lines(buffer: &str) -> usize {
-    buffer.split('\n').count().max(1)
+/// Calculate the number of visual lines a buffer will occupy when rendered
+/// with the given width. Accounts for text wrapping.
+pub fn visual_lines(buffer: &str, width: usize) -> usize {
+    if width == 0 {
+        return buffer.split('\n').count().max(1);
+    }
+
+    let mut total = 0;
+    for line in buffer.split('\n') {
+        if line.is_empty() {
+            total += 1;
+        } else {
+            // Count characters (not bytes) for proper Unicode handling
+            let char_count = line.chars().count();
+            // Each line takes at least 1 visual line, plus additional lines for wrapping
+            total += (char_count + width - 1) / width;
+        }
+    }
+    total.max(1)
 }
 
 #[cfg(test)]
@@ -102,11 +119,29 @@ mod tests {
     #[test]
     fn editor_newline_increases_visual_lines() {
         let mut e = Editor::new();
-        assert_eq!(e.visual_lines(), 1);
+        assert_eq!(e.visual_lines(80), 1);
         e.insert_char('a');
-        assert_eq!(e.visual_lines(), 1);
+        assert_eq!(e.visual_lines(80), 1);
         e.insert_newline();
-        assert_eq!(e.visual_lines(), 2);
+        assert_eq!(e.visual_lines(80), 2);
+    }
+
+    #[test]
+    fn visual_lines_accounts_for_wrapping() {
+        // 10 chars in width 10 = 1 line
+        assert_eq!(visual_lines("1234567890", 10), 1);
+        // 11 chars in width 10 = 2 lines
+        assert_eq!(visual_lines("12345678901", 10), 2);
+        // 20 chars in width 10 = 2 lines
+        assert_eq!(visual_lines("12345678901234567890", 10), 2);
+        // 21 chars in width 10 = 3 lines
+        assert_eq!(visual_lines("123456789012345678901", 10), 3);
+        // Multiple lines with wrapping
+        assert_eq!(visual_lines("12345678901\n12345678901", 10), 4);
+        // Empty line counts as 1
+        assert_eq!(visual_lines("", 10), 1);
+        // Width 0 falls back to just counting newlines
+        assert_eq!(visual_lines("12345678901234567890", 0), 1);
     }
 
     #[test]

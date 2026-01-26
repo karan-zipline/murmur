@@ -45,7 +45,15 @@ impl<'a> WorktreeManager<'a> {
             return Err(anyhow!("project repo not found: {}", repo_dir.display()));
         }
 
-        self.git.fetch_origin(&repo_dir).await.ok();
+        // Fetch latest from remote before creating worktree
+        // We warn but don't fail if fetch fails - agents can still work with cached refs
+        if let Err(err) = self.git.fetch_origin(&repo_dir).await {
+            tracing::warn!(
+                project = %project,
+                error = %err,
+                "git fetch failed, proceeding with potentially stale refs"
+            );
+        }
 
         let show = self.git.remote_show_origin(&repo_dir).await?;
         let mut candidates = Vec::new();
