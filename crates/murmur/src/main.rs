@@ -195,10 +195,7 @@ enum ProjectCommand {
 #[derive(Subcommand, Debug)]
 enum ProjectConfigCommand {
     /// Get a single configuration value
-    Get {
-        project: String,
-        key: String,
-    },
+    Get { project: String, key: String },
     /// Set a configuration value
     #[command(after_help = "\
 KEYS AND VALUES:
@@ -228,9 +225,7 @@ EXAMPLES:
         value: String,
     },
     /// Show all configuration values
-    Show {
-        project: String,
-    },
+    Show { project: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1945,12 +1940,9 @@ async fn resolve_issue_project(
 }
 
 async fn project_issue_backend_is_tk(paths: &MurmurPaths, project: &str) -> anyhow::Result<bool> {
-    let resp = client::project_config_get(
-        paths,
-        project.trim().to_owned(),
-        "issue-backend".to_owned(),
-    )
-    .await?;
+    let resp =
+        client::project_config_get(paths, project.trim().to_owned(), "issue-backend".to_owned())
+            .await?;
 
     Ok(resp
         .value

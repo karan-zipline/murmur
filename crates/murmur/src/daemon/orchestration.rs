@@ -149,12 +149,8 @@ async fn orchestrator_tick_once(shared: Arc<SharedState>, project: &str) -> anyh
             break;
         }
 
-        if let Err(err) = spawn_agent_without_issue(
-            shared.clone(),
-            project.to_owned(),
-            kickstart.clone(),
-        )
-        .await
+        if let Err(err) =
+            spawn_agent_without_issue(shared.clone(), project.to_owned(), kickstart.clone()).await
         {
             tracing::warn!(project = %project, error = ?err, "spawn agent failed");
         }
