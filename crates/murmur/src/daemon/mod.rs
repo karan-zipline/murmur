@@ -188,7 +188,6 @@ async fn spawn_agent_without_issue(
             AgentRuntime {
                 record: record.clone(),
                 backend,
-                codex_thread_id: None,
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
                 outbound_tx: outbound_tx.clone(),
@@ -350,7 +349,6 @@ async fn spawn_agent_with_kickoff(
             AgentRuntime {
                 record: record.clone(),
                 backend,
-                codex_thread_id: None,
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
                 outbound_tx: outbound_tx.clone(),
@@ -764,7 +762,7 @@ async fn codex_run_turn(
         let agents = shared.agents.lock().await;
         let rt = agents.agents.get(agent_id);
         (
-            rt.and_then(|rt| rt.codex_thread_id.clone()),
+            rt.and_then(|rt| rt.record.codex_thread_id.clone()),
             rt.map(|rt| rt.record.project.clone()).unwrap_or_default(),
             rt.map(|rt| rt.record.role),
         )
@@ -929,7 +927,7 @@ async fn apply_stream_message(shared: &SharedState, agent_id: &str, msg: StreamM
         };
 
         if let Some(thread_id) = msg.thread_id.clone() {
-            rt.codex_thread_id = Some(thread_id);
+            rt.record.codex_thread_id = Some(thread_id);
         }
 
         for chat in &chat_messages {
@@ -1090,7 +1088,6 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
             AgentRuntime {
                 record,
                 backend,
-                codex_thread_id: None, // Lost on restart, Codex conversations can't resume
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
                 outbound_tx,

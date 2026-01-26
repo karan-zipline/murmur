@@ -45,6 +45,8 @@ pub struct AgentRecord {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_reason: Option<AgentExitReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_thread_id: Option<String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -79,6 +81,7 @@ impl AgentRecord {
             pid: None,
             exit_code: None,
             exit_reason: None,
+            codex_thread_id: None,
         }
     }
 

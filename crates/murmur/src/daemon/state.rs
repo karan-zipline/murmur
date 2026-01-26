@@ -22,7 +22,6 @@ pub(super) const DEFAULT_CHAT_CAPACITY: usize = 200;
 pub(super) struct AgentRuntime {
     pub(super) record: AgentRecord,
     pub(super) backend: AgentBackend,
-    pub(super) codex_thread_id: Option<String>,
     pub(super) chat: ChatHistory,
     pub(super) last_idle_at_ms: Option<u64>,
     pub(super) outbound_tx: mpsc::Sender<ChatMessage>,

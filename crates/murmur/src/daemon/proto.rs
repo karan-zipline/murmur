@@ -81,6 +81,7 @@ pub(in crate::daemon) fn agent_info_from_record(
         worktree_dir: record.worktree_dir.clone(),
         pid: record.pid,
         exit_code: record.exit_code,
+        codex_thread_id: record.codex_thread_id.clone(),
     }
 }
 

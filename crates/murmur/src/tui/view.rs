@@ -871,6 +871,7 @@ mod tests {
                 worktree_dir: "/tmp".to_owned(),
                 pid: None,
                 exit_code: None,
+                codex_thread_id: None,
             },
             murmur_protocol::AgentInfo {
                 id: "manager-demo".to_owned(),
@@ -885,6 +886,7 @@ mod tests {
                 worktree_dir: "/tmp".to_owned(),
                 pid: None,
                 exit_code: None,
+                codex_thread_id: None,
             },
             murmur_protocol::AgentInfo {
                 id: "a-2".to_owned(),
@@ -899,6 +901,7 @@ mod tests {
                 worktree_dir: "/tmp".to_owned(),
                 pid: None,
                 exit_code: Some(0),
+                codex_thread_id: None,
             },
         ];
         model.selected_agent = 0;
@@ -934,6 +937,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
 

@@ -1442,6 +1442,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }];
@@ -1486,6 +1487,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }];
@@ -1524,6 +1526,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }];
@@ -1565,6 +1568,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
             created_at_ms: 1,
             updated_at_ms: 0,
         }];
@@ -1672,6 +1676,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }];
@@ -1721,6 +1726,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }];
@@ -1777,6 +1783,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }];
@@ -1830,6 +1837,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }];

@@ -162,7 +162,6 @@ pub(in crate::daemon) async fn handle_manager_start(
             super::super::AgentRuntime {
                 record: record.clone(),
                 backend,
-                codex_thread_id: None,
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
                 outbound_tx: outbound_tx.clone(),
