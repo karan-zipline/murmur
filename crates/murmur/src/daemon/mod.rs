@@ -114,6 +114,7 @@ pub async fn run_foreground(paths: &MurmurPaths) -> anyhow::Result<()> {
         merge_locks: tokio::sync::Mutex::new(std::collections::BTreeMap::new()),
         commits: tokio::sync::Mutex::new(std::collections::BTreeMap::new()),
         dedup: dedup_store.clone(),
+        user_activity: tokio::sync::Mutex::new(std::collections::BTreeMap::new()),
     });
 
     // Restore agents from disk so that agents from previous sessions are recognized

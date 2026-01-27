@@ -362,6 +362,9 @@ pub(in crate::daemon) async fn handle_manager_send_message(
         rt.outbound_tx.clone()
     };
 
+    // Record user activity for intervention detection
+    shared.record_user_activity(project).await;
+
     emit_agent_chat_event(shared.as_ref(), &manager_id, project, msg.clone());
     if outbound_tx.send(msg).await.is_err() {
         return error_response(req, "manager channel closed");

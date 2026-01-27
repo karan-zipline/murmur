@@ -141,15 +141,23 @@ pub(in crate::daemon) async fn handle_question_respond(
         return error_response(req, "id is required");
     }
 
-    let ok = {
+    let (ok, project) = {
         let mut pending = shared.pending_questions.lock().await;
-        pending.respond(UserQuestionResponse {
+        // Get the project before responding (respond() removes the item)
+        let project = pending.pending.get(&respond.id).map(|q| q.request.project.clone());
+        let ok = pending.respond(UserQuestionResponse {
             id: respond.id,
             answers: respond.answers,
-        })
+        });
+        (ok, project)
     };
     if !ok {
         return error_response(req, "question request not found");
+    }
+
+    // Record user activity for intervention detection
+    if let Some(project) = project {
+        shared.record_user_activity(&project).await;
     }
 
     Response {

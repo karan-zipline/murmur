@@ -197,6 +197,9 @@ pub struct ProjectInfo {
     pub max_agents: u16,
     pub running: bool,
     pub backend: String,
+    /// Whether user intervention is currently active for this project.
+    #[serde(default)]
+    pub user_intervening: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,6 +252,12 @@ pub struct ProjectStatusResponse {
     pub remote_matches: bool,
 
     pub orchestrator_running: bool,
+
+    // Intervention status
+    pub user_intervening: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds_since_activity: Option<u64>,
+    pub silence_threshold_secs: u64,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -29,6 +29,9 @@ pub struct ConfigFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub polling: Option<PollingConfig>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestration: Option<OrchestrationConfig>,
+
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, toml::Value>,
 }
@@ -118,6 +121,29 @@ impl PollingConfig {
     }
 }
 
+/// Default silence threshold in seconds (60s, matching fab).
+pub const DEFAULT_SILENCE_THRESHOLD_SECS: u64 = 60;
+
+/// Configuration for orchestration behavior.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OrchestrationConfig {
+    /// Duration of user silence (in seconds) before resuming automatic agent spawning.
+    /// When a user sends a message, the orchestrator pauses spawning for this duration.
+    /// Set to 0 to disable intervention detection.
+    #[serde(
+        default = "OrchestrationConfig::default_silence_threshold",
+        rename = "silence-threshold-secs",
+        alias = "silence_threshold_secs"
+    )]
+    pub silence_threshold_secs: u64,
+}
+
+impl OrchestrationConfig {
+    fn default_silence_threshold() -> u64 {
+        DEFAULT_SILENCE_THRESHOLD_SECS
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
     pub name: String,
@@ -161,6 +187,16 @@ pub struct ProjectConfig {
 
     #[serde(rename = "linear-project", default)]
     pub linear_project: Option<String>,
+
+    /// Per-project silence threshold override in seconds.
+    /// If set to a non-zero value, overrides the global orchestration setting.
+    #[serde(
+        rename = "silence-threshold-secs",
+        alias = "silence_threshold_secs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub silence_threshold_secs: Option<u64>,
 
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, toml::Value>,
@@ -281,6 +317,24 @@ impl ConfigFile {
         self.polling.clone().unwrap_or_default()
     }
 
+    /// Returns the effective silence threshold for a project.
+    /// Checks project-level override first, then falls back to global config.
+    pub fn silence_threshold_for_project(&self, project: &str) -> u64 {
+        // Check project-level override first
+        if let Some(p) = self.project(project) {
+            if let Some(t) = p.silence_threshold_secs {
+                if t > 0 {
+                    return t;
+                }
+            }
+        }
+        // Fall back to global orchestration config
+        self.orchestration
+            .as_ref()
+            .map(|o| o.silence_threshold_secs)
+            .unwrap_or(DEFAULT_SILENCE_THRESHOLD_SECS)
+    }
+
     pub fn add_project(&self, project: ProjectConfig) -> Result<Self, ConfigError> {
         validate_project_name(&project.name)?;
         if self.project(&project.name).is_some() {
@@ -379,6 +433,13 @@ impl ConfigFile {
             "linear-project" => {
                 updated.linear_project = (!value.trim().is_empty()).then(|| value.to_owned());
             }
+            "silence-threshold-secs" => {
+                let parsed: u64 = value.parse().map_err(|_| ConfigError::InvalidValue {
+                    key: key.clone(),
+                    value: value.to_owned(),
+                })?;
+                updated.silence_threshold_secs = if parsed > 0 { Some(parsed) } else { None };
+            }
             _ => {
                 return Err(ConfigError::UnknownKey { key });
             }
@@ -425,6 +486,9 @@ impl ConfigFile {
             "linear-team" => toml::Value::String(project.linear_team.clone().unwrap_or_default()),
             "linear-project" => {
                 toml::Value::String(project.linear_project.clone().unwrap_or_default())
+            }
+            "silence-threshold-secs" => {
+                toml::Value::Integer(project.silence_threshold_secs.unwrap_or(0) as i64)
             }
             _ => return Err(ConfigError::UnknownKey { key }),
         };
@@ -497,6 +561,10 @@ pub fn project_config_map(project: &ProjectConfig) -> BTreeMap<String, toml::Val
         (
             "linear-project".to_owned(),
             toml::Value::String(project.linear_project.clone().unwrap_or_default()),
+        ),
+        (
+            "silence-threshold-secs".to_owned(),
+            toml::Value::Integer(project.silence_threshold_secs.unwrap_or(0) as i64),
         ),
     ])
 }
@@ -581,6 +649,7 @@ mod tests {
                     autostart: false,
                     linear_team: None,
                     linear_project: None,
+                    silence_threshold_secs: None,
                     extra: BTreeMap::new(),
                 },
                 ProjectConfig {
@@ -681,6 +750,7 @@ mod tests {
             autostart: false,
             linear_team: None,
             linear_project: None,
+            silence_threshold_secs: None,
             extra: BTreeMap::new(),
         }
     }

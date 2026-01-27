@@ -1154,6 +1154,22 @@ async fn dispatch_project(command: ProjectCommand, paths: &MurmurPaths) -> anyho
             println!("remote_matches\t{}", status.remote_matches);
             println!("socket_reachable\t{}", status.socket_reachable);
             println!("orchestrator_running\t{}", status.orchestrator_running);
+            // Intervention status
+            if status.user_intervening {
+                println!(
+                    "user_intervention\tactive (last activity: {}s ago, threshold: {}s)",
+                    status.seconds_since_activity.unwrap_or(0),
+                    status.silence_threshold_secs
+                );
+            } else if status.seconds_since_activity.is_some() {
+                println!(
+                    "user_intervention\tinactive (last activity: {}s ago, threshold: {}s)",
+                    status.seconds_since_activity.unwrap(),
+                    status.silence_threshold_secs
+                );
+            } else {
+                println!("user_intervention\tno activity recorded");
+            }
             Ok(())
         }
         ProjectCommand::Config { command } => dispatch_project_config(command, paths).await,

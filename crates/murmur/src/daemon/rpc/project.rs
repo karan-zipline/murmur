@@ -35,11 +35,19 @@ fn remote_urls_match(a: &str, b: &str) -> bool {
 pub(in crate::daemon) async fn handle_project_list(shared: &SharedState, req: Request) -> Response {
     let cfg = shared.config.lock().await;
     let project_cfgs = cfg.projects.clone();
+    // Collect silence thresholds for each project
+    let thresholds: Vec<u64> = project_cfgs
+        .iter()
+        .map(|p| cfg.silence_threshold_for_project(&p.name))
+        .collect();
     drop(cfg);
 
     let mut projects = Vec::with_capacity(project_cfgs.len());
-    for p in project_cfgs {
+    for (i, p) in project_cfgs.into_iter().enumerate() {
         let running = orchestrator_is_running(shared, &p.name).await;
+        let user_intervening = shared
+            .is_user_intervening(&p.name, thresholds[i])
+            .await;
         projects.push(ProjectInfo {
             name: p.name.clone(),
             remote_url: p.remote_url.clone(),
@@ -49,6 +57,7 @@ pub(in crate::daemon) async fn handle_project_list(shared: &SharedState, req: Re
             max_agents: p.max_agents,
             running,
             backend: format!("{:?}", p.effective_coding_backend()).to_ascii_lowercase(),
+            user_intervening,
         });
     }
 
@@ -107,6 +116,7 @@ pub(in crate::daemon) async fn handle_project_add(
         autostart,
         linear_team: None,
         linear_project: None,
+        silence_threshold_secs: None,
         extra: Default::default(),
     };
 
@@ -465,12 +475,15 @@ pub(in crate::daemon) async fn handle_project_status(
         Err(err) => return error_response(req, &format!("invalid payload: {err}")),
     };
 
-    let cfg = shared.config.lock().await;
-    let Some(project) = cfg.project(&status.name) else {
-        return error_response(req, "project not found");
+    let (configured, silence_threshold_secs) = {
+        let cfg = shared.config.lock().await;
+        let Some(project) = cfg.project(&status.name) else {
+            return error_response(req, "project not found");
+        };
+        let configured = project.remote_url.clone();
+        let threshold = cfg.silence_threshold_for_project(&status.name);
+        (configured, threshold)
     };
-    let configured = project.remote_url.clone();
-    drop(cfg);
 
     let repo_dir = project_repo_dir(&shared.paths, &status.name);
     let socket_path = shared.paths.socket_path.clone();
@@ -490,6 +503,12 @@ pub(in crate::daemon) async fn handle_project_status(
 
     let orchestrator_running = orchestrator_is_running(shared, &status.name).await;
 
+    // Compute intervention status
+    let seconds_since_activity = shared.seconds_since_activity(&status.name).await;
+    let user_intervening = shared
+        .is_user_intervening(&status.name, silence_threshold_secs)
+        .await;
+
     let payload = ProjectStatusResponse {
         name: status.name,
         repo_dir: repo_dir.to_string_lossy().to_string(),
@@ -500,6 +519,9 @@ pub(in crate::daemon) async fn handle_project_status(
         remote_url_actual,
         remote_matches,
         orchestrator_running,
+        user_intervening,
+        seconds_since_activity,
+        silence_threshold_secs,
     };
 
     Response {

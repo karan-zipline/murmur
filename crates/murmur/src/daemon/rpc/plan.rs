@@ -357,6 +357,9 @@ pub(in crate::daemon) async fn handle_plan_send_message(
         (rt.outbound_tx.clone(), rt.record.project.clone())
     };
 
+    // Record user activity for intervention detection
+    shared.record_user_activity(&project).await;
+
     emit_agent_chat_event(shared.as_ref(), plan_id, &project, msg.clone());
     if outbound_tx.send(msg).await.is_err() {
         return error_response(req, "planner channel closed");

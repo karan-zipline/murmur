@@ -105,12 +105,28 @@ pub(in crate::daemon) async fn orchestrator_loop(
 }
 
 async fn orchestrator_tick_once(shared: Arc<SharedState>, project: &str) -> anyhow::Result<()> {
-    let max_agents = {
+    // Get config values: max_agents and silence_threshold
+    let (max_agents, silence_threshold) = {
         let cfg = shared.config.lock().await;
-        cfg.project(project)
+        let max = cfg
+            .project(project)
             .map(|p| p.max_agents as usize)
-            .ok_or_else(|| anyhow!("project not found"))?
+            .ok_or_else(|| anyhow!("project not found"))?;
+        let threshold = cfg.silence_threshold_for_project(project);
+        (max, threshold)
     };
+
+    // Check user intervention before spawning
+    if shared.is_user_intervening(project, silence_threshold).await {
+        let secs = shared.seconds_since_activity(project).await.unwrap_or(0);
+        tracing::debug!(
+            project = %project,
+            seconds_since_activity = secs,
+            threshold = silence_threshold,
+            "skipping spawn: user intervention active"
+        );
+        return Ok(());
+    }
 
     let ready = {
         let backend = issue_backend_for_project(shared.as_ref(), project)

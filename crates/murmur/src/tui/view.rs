@@ -44,7 +44,10 @@ fn draw_header(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect
         .count();
     let total = model.agents.len();
 
-    let line = Line::from(vec![
+    // Check if any project has active intervention
+    let any_intervening = model.projects.iter().any(|p| p.user_intervening);
+
+    let mut spans = vec![
         Span::styled("murmur", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         conn,
@@ -68,7 +71,18 @@ fn draw_header(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect
             format!("questions: {}", model.pending_questions.len()),
             Style::default().fg(Color::Gray),
         ),
-    ]);
+    ];
+
+    // Show intervention status if any project is being intervened
+    if any_intervening {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "⏸ user active",
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+
+    let line = Line::from(spans);
 
     frame.render_widget(Paragraph::new(line), area);
 }

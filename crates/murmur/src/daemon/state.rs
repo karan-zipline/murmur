@@ -169,4 +169,34 @@ pub(super) struct SharedState {
     pub(super) merge_locks: tokio::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub(super) commits: tokio::sync::Mutex<BTreeMap<String, CommitLog>>,
     pub(super) dedup: Arc<tokio::sync::Mutex<DedupStore>>,
+    /// Tracks the last user activity timestamp for each project.
+    /// Used by the orchestrator to pause spawning when users are active.
+    pub(super) user_activity: tokio::sync::Mutex<BTreeMap<String, Instant>>,
+}
+
+impl SharedState {
+    /// Record user activity for a project.
+    pub(super) async fn record_user_activity(&self, project: &str) {
+        let mut activity = self.user_activity.lock().await;
+        activity.insert(project.to_owned(), Instant::now());
+    }
+
+    /// Get seconds since last user activity for a project.
+    /// Returns None if no activity has been recorded.
+    pub(super) async fn seconds_since_activity(&self, project: &str) -> Option<u64> {
+        let activity = self.user_activity.lock().await;
+        activity.get(project).map(|t| t.elapsed().as_secs())
+    }
+
+    /// Check if user is currently intervening (within silence threshold).
+    /// Returns false if threshold is 0 (intervention detection disabled).
+    pub(super) async fn is_user_intervening(&self, project: &str, threshold_secs: u64) -> bool {
+        if threshold_secs == 0 {
+            return false; // Intervention detection disabled
+        }
+        match self.seconds_since_activity(project).await {
+            Some(secs) => secs < threshold_secs,
+            None => false,
+        }
+    }
 }
