@@ -23,8 +23,9 @@ use super::super::merge::{
 };
 use super::super::{
     agent_info_from_record, cleanup_agent_runtime, emit_agent_chat_event, emit_agent_deleted_event,
-    issue_backend_for_project, mark_issue_completed, now_ms, persist_agents_runtime,
-    release_claims_for_agent, spawn_agent, to_proto_chat_message, SharedState,
+    emit_agent_state_changed_event, issue_backend_for_project, mark_issue_completed, now_ms,
+    persist_agents_runtime, release_claims_for_agent, spawn_agent, to_proto_chat_message,
+    SharedState,
 };
 use super::error_response;
 
@@ -232,7 +233,7 @@ pub(in crate::daemon) async fn handle_agent_send_message(
     let now_ms = now_ms();
     let msg = ChatMessage::new(ChatRole::User, send.message.clone(), now_ms);
 
-    let (outbound_tx, project) = {
+    let (outbound_tx, project, resumed_from_idle) = {
         let mut agents = shared.agents.lock().await;
         let Some(rt) = agents.agents.get_mut(&send.agent_id) else {
             return error_response(req, "agent not found");
@@ -244,17 +245,38 @@ pub(in crate::daemon) async fn handle_agent_send_message(
             && !matches!(
                 rt.record.state,
                 murmur_core::agent::AgentState::Running
+                    | murmur_core::agent::AgentState::Idle
                     | murmur_core::agent::AgentState::NeedsResolution
             )
         {
             return error_response(req, "agent is not running");
         }
 
+        // Transition from Idle to Running when receiving new input
+        let resumed_from_idle = if rt.record.state == murmur_core::agent::AgentState::Idle {
+            rt.record = rt
+                .record
+                .apply_event(murmur_core::agent::AgentEvent::ResumedFromIdle, now_ms);
+            true
+        } else {
+            false
+        };
+
         rt.chat.push(msg.clone());
-        (rt.outbound_tx.clone(), rt.record.project.clone())
+        (rt.outbound_tx.clone(), rt.record.project.clone(), resumed_from_idle)
     };
 
     emit_agent_chat_event(shared.as_ref(), &send.agent_id, &project, msg.clone());
+
+    // Emit state change event if agent resumed from idle
+    if resumed_from_idle {
+        emit_agent_state_changed_event(
+            shared.as_ref(),
+            &send.agent_id,
+            &project,
+            murmur_core::agent::AgentState::Running,
+        );
+    }
 
     if outbound_tx.send(msg).await.is_err() {
         return error_response(req, "agent channel closed");
@@ -941,6 +963,12 @@ pub(in crate::daemon) async fn handle_agent_idle(
             };
         };
         rt.last_idle_at_ms = Some(now_ms);
+
+        // Transition to Idle state if currently Running
+        if rt.record.state == AgentState::Running {
+            rt.record = rt.record.apply_event(AgentEvent::BecameIdle, now_ms);
+        }
+
         rt.record.project.clone()
     };
 

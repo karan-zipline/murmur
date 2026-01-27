@@ -64,6 +64,7 @@ pub(in crate::daemon) fn agent_info_from_record(
         state: match record.state {
             murmur_core::agent::AgentState::Starting => ProtoAgentState::Starting,
             murmur_core::agent::AgentState::Running => ProtoAgentState::Running,
+            murmur_core::agent::AgentState::Idle => ProtoAgentState::Idle,
             murmur_core::agent::AgentState::NeedsResolution => ProtoAgentState::NeedsResolution,
             murmur_core::agent::AgentState::Exited => ProtoAgentState::Exited,
             murmur_core::agent::AgentState::Aborted => ProtoAgentState::Aborted,
@@ -81,6 +82,7 @@ pub(in crate::daemon) fn agent_info_from_record(
         worktree_dir: record.worktree_dir.clone(),
         pid: record.pid,
         exit_code: record.exit_code,
+        codex_thread_id: record.codex_thread_id.clone(),
     }
 }
 

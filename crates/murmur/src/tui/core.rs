@@ -1298,9 +1298,10 @@ fn state_rank(state: murmur_protocol::AgentState) -> u8 {
     match state {
         murmur_protocol::AgentState::NeedsResolution => 0,
         murmur_protocol::AgentState::Running => 1,
-        murmur_protocol::AgentState::Starting => 2,
-        murmur_protocol::AgentState::Exited => 3,
-        murmur_protocol::AgentState::Aborted => 4,
+        murmur_protocol::AgentState::Idle => 2,
+        murmur_protocol::AgentState::Starting => 3,
+        murmur_protocol::AgentState::Exited => 4,
+        murmur_protocol::AgentState::Aborted => 5,
     }
 }
 
@@ -1532,6 +1533,7 @@ mod tests {
             exit_code: None,
             created_at_ms: 0,
             updated_at_ms: 0,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
 
@@ -1576,6 +1578,7 @@ mod tests {
             exit_code: None,
             created_at_ms: 0,
             updated_at_ms: 0,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
 
@@ -1616,6 +1619,7 @@ mod tests {
             exit_code: None,
             created_at_ms: 0,
             updated_at_ms: 0,
+            codex_thread_id: None,
         }];
 
         let (model, _effects) = reduce(model, Msg::AgentListLoaded(Ok(agents)));
@@ -1657,6 +1661,7 @@ mod tests {
             exit_code: None,
             created_at_ms: 1,
             updated_at_ms: 0,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
         model.mode = Mode::Input;
@@ -1765,6 +1770,7 @@ mod tests {
             exit_code: None,
             created_at_ms: 0,
             updated_at_ms: 0,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
         model.pending_permissions = vec![
@@ -1814,6 +1820,7 @@ mod tests {
             exit_code: None,
             created_at_ms: 0,
             updated_at_ms: 0,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
 
@@ -1870,6 +1877,7 @@ mod tests {
             exit_code: None,
             created_at_ms: 0,
             updated_at_ms: 0,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
 
@@ -1923,6 +1931,7 @@ mod tests {
             exit_code: None,
             created_at_ms: 0,
             updated_at_ms: 0,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
 

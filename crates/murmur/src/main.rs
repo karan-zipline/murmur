@@ -1383,6 +1383,7 @@ fn format_agent_state(state: murmur_protocol::AgentState) -> &'static str {
     match state {
         murmur_protocol::AgentState::Starting => "starting",
         murmur_protocol::AgentState::Running => "running",
+        murmur_protocol::AgentState::Idle => "idle",
         murmur_protocol::AgentState::NeedsResolution => "needs_resolution",
         murmur_protocol::AgentState::Exited => "exited",
         murmur_protocol::AgentState::Aborted => "aborted",

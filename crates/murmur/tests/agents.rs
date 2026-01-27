@@ -89,7 +89,8 @@ set -euo pipefail
 
 prompt="${@: -1}"
 
-if [[ "${2:-}" == "resume" ]]; then
+# Check if "resume" appears anywhere in the arguments
+if [[ " $* " == *" resume "* ]]; then
   echo '{"type":"item.completed","item":{"id":"i-1","type":"agent_message","text":"(fake codex) resumed: '"$prompt"'"}}'
   echo '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}'
   exit 0

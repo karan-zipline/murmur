@@ -15,6 +15,7 @@ pub enum AgentRole {
 pub enum AgentState {
     Starting,
     Running,
+    Idle,
     NeedsResolution,
     Exited,
     Aborted,
@@ -45,6 +46,9 @@ pub struct AgentRecord {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_reason: Option<AgentExitReason>,
+    /// Codex thread ID for conversation resumption
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_thread_id: Option<String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -53,6 +57,8 @@ pub enum AgentEvent<'a> {
     NeedsResolution { reason: &'a str },
     AssignedIssue { issue_id: &'a str },
     Described { description: &'a str },
+    BecameIdle,
+    ResumedFromIdle,
     Exited { code: Option<i32> },
     Aborted { by: &'a str },
 }
@@ -79,6 +85,7 @@ impl AgentRecord {
             pid: None,
             exit_code: None,
             exit_reason: None,
+            codex_thread_id: None,
         }
     }
 
@@ -107,6 +114,18 @@ impl AgentRecord {
                 } else {
                     Some(trimmed.to_owned())
                 };
+            }
+            AgentEvent::BecameIdle => {
+                // Transition from Running to Idle when agent finishes processing
+                if next.state == AgentState::Running {
+                    next.state = AgentState::Idle;
+                }
+            }
+            AgentEvent::ResumedFromIdle => {
+                // Transition from Idle to Running when agent receives new input
+                if next.state == AgentState::Idle {
+                    next.state = AgentState::Running;
+                }
             }
             AgentEvent::Exited { code } => {
                 next.pid = None;
@@ -302,5 +321,151 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].content, "2");
         assert_eq!(got[1].content, "3");
+    }
+
+    #[test]
+    fn agent_transitions_running_to_idle() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100);
+        assert_eq!(a.state, AgentState::Running);
+
+        let b = a.apply_event(AgentEvent::BecameIdle, 1200);
+        assert_eq!(b.state, AgentState::Idle);
+        assert_eq!(b.updated_at_ms, 1200);
+    }
+
+    #[test]
+    fn agent_transitions_idle_to_running() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100)
+        .apply_event(AgentEvent::BecameIdle, 1200);
+        assert_eq!(a.state, AgentState::Idle);
+
+        let b = a.apply_event(AgentEvent::ResumedFromIdle, 1300);
+        assert_eq!(b.state, AgentState::Running);
+        assert_eq!(b.updated_at_ms, 1300);
+    }
+
+    #[test]
+    fn agent_transitions_idle_to_exited() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100)
+        .apply_event(AgentEvent::BecameIdle, 1200);
+
+        let b = a.apply_event(AgentEvent::Exited { code: Some(0) }, 1300);
+        assert_eq!(b.state, AgentState::Exited);
+        assert_eq!(b.exit_code, Some(0));
+    }
+
+    #[test]
+    fn agent_transitions_idle_to_aborted() {
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100)
+        .apply_event(AgentEvent::BecameIdle, 1200);
+
+        let b = a.apply_event(AgentEvent::Aborted { by: "user" }, 1300);
+        assert_eq!(b.state, AgentState::Aborted);
+    }
+
+    #[test]
+    fn agent_idle_only_from_running() {
+        // Starting -> BecameIdle should not change state
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        );
+        assert_eq!(a.state, AgentState::Starting);
+
+        let b = a.apply_event(AgentEvent::BecameIdle, 1100);
+        assert_eq!(b.state, AgentState::Starting);
+    }
+
+    #[test]
+    fn agent_resume_only_from_idle() {
+        // Running -> ResumedFromIdle should not change state
+        let a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        )
+        .apply_event(AgentEvent::Spawned { pid: 123 }, 1100);
+        assert_eq!(a.state, AgentState::Running);
+
+        let b = a.apply_event(AgentEvent::ResumedFromIdle, 1200);
+        assert_eq!(b.state, AgentState::Running);
+    }
+
+    #[test]
+    fn agent_record_serializes_with_codex_thread_id() {
+        let mut a = AgentRecord::new(
+            "a-1".to_owned(),
+            "demo".to_owned(),
+            AgentRole::Coding,
+            "ISSUE-1".to_owned(),
+            1000,
+            "/tmp/wt".to_owned(),
+        );
+        a.codex_thread_id = Some("thread_abc123".to_owned());
+
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("codex_thread_id"));
+        assert!(json.contains("thread_abc123"));
+
+        let deserialized: AgentRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.codex_thread_id, Some("thread_abc123".to_owned()));
+    }
+
+    #[test]
+    fn agent_record_deserializes_without_codex_thread_id() {
+        // Simulate old JSON format without codex_thread_id
+        let json = r#"{
+            "id": "a-1",
+            "project": "demo",
+            "role": "coding",
+            "issue_id": "ISSUE-1",
+            "state": "running",
+            "created_at_ms": 1000,
+            "updated_at_ms": 1100,
+            "worktree_dir": "/tmp/wt"
+        }"#;
+
+        let deserialized: AgentRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(deserialized.codex_thread_id, None);
+        assert_eq!(deserialized.id, "a-1");
     }
 }

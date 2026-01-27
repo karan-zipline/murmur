@@ -196,6 +196,7 @@ fn agent_state_icon(agent: &murmur_protocol::AgentInfo, now_ms: u64) -> &'static
     match agent.state {
         murmur_protocol::AgentState::Starting => "◌",
         murmur_protocol::AgentState::Running => spinner_frame(now_ms),
+        murmur_protocol::AgentState::Idle => "◦",
         murmur_protocol::AgentState::NeedsResolution => "!",
         murmur_protocol::AgentState::Exited => "✓",
         murmur_protocol::AgentState::Aborted => "×",
@@ -212,6 +213,7 @@ fn state_style(state: murmur_protocol::AgentState) -> Style {
     match state {
         murmur_protocol::AgentState::Starting => Style::default().fg(Color::Yellow),
         murmur_protocol::AgentState::Running => Style::default().fg(Color::Cyan),
+        murmur_protocol::AgentState::Idle => Style::default().fg(Color::Yellow),
         murmur_protocol::AgentState::NeedsResolution => Style::default().fg(Color::Red),
         murmur_protocol::AgentState::Exited => Style::default().fg(Color::Green),
         murmur_protocol::AgentState::Aborted => Style::default().fg(Color::Gray),
@@ -227,6 +229,7 @@ fn duration_label_for_agent(now_ms: u64, agent: &murmur_protocol::AgentInfo) -> 
     let end_ms = match agent.state {
         murmur_protocol::AgentState::Starting
         | murmur_protocol::AgentState::Running
+        | murmur_protocol::AgentState::Idle
         | murmur_protocol::AgentState::NeedsResolution => now_ms,
         murmur_protocol::AgentState::Exited | murmur_protocol::AgentState::Aborted => {
             agent.updated_at_ms
@@ -865,6 +868,7 @@ mod tests {
                 worktree_dir: "/tmp".to_owned(),
                 pid: None,
                 exit_code: None,
+                codex_thread_id: None,
             },
             murmur_protocol::AgentInfo {
                 id: "manager-demo".to_owned(),
@@ -879,6 +883,7 @@ mod tests {
                 worktree_dir: "/tmp".to_owned(),
                 pid: None,
                 exit_code: None,
+                codex_thread_id: None,
             },
             murmur_protocol::AgentInfo {
                 id: "a-2".to_owned(),
@@ -893,6 +898,7 @@ mod tests {
                 worktree_dir: "/tmp".to_owned(),
                 pid: None,
                 exit_code: Some(0),
+                codex_thread_id: None,
             },
         ];
         model.selected_agent = 0;
@@ -928,6 +934,7 @@ mod tests {
             worktree_dir: "/tmp".to_owned(),
             pid: None,
             exit_code: None,
+            codex_thread_id: None,
         }];
         model.selected_agent = 0;
 

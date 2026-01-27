@@ -149,6 +149,13 @@ pub struct AgentDeletedEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentIdleEvent {
+    pub agent_id: String,
+    pub project: String,
+    pub state: AgentState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectAddRequest {
     pub name: String,
     pub remote_url: String,
@@ -255,6 +262,7 @@ pub enum AgentRole {
 pub enum AgentState {
     Starting,
     Running,
+    Idle,
     NeedsResolution,
     Exited,
     Aborted,
@@ -306,6 +314,9 @@ pub struct AgentInfo {
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
+    /// Codex thread ID for conversation resumption
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

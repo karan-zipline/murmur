@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context as _};
-use murmur_core::agent::{AgentEvent, AgentRecord, AgentRole, ChatHistory, ChatMessage, ChatRole};
+use murmur_core::agent::{
+    AgentEvent, AgentRecord, AgentRole, AgentState, ChatHistory, ChatMessage, ChatRole,
+};
 use murmur_core::claims::ClaimRegistry;
 use murmur_core::config::AgentBackend;
 use murmur_core::paths::MurmurPaths;
@@ -830,18 +832,36 @@ async fn codex_run_turn(
     let status = child.wait().await.ok();
     let exit_code = status.and_then(|s| s.code());
     let now_ms = now_ms();
-    {
+
+    let idle_project = {
         let mut agents = shared.agents.lock().await;
         if let Some(rt) = agents.agents.get_mut(agent_id) {
             if rt.record.state == murmur_core::agent::AgentState::Aborted {
                 rt.record.exit_code = exit_code;
                 rt.record.updated_at_ms = now_ms;
+                None
             } else {
                 rt.record.pid = None;
                 rt.record.exit_code = exit_code;
                 rt.record.updated_at_ms = now_ms;
+
+                // Transition to Idle after turn completes
+                if rt.record.state == AgentState::Running {
+                    rt.record = rt.record.apply_event(AgentEvent::BecameIdle, now_ms);
+                    rt.last_idle_at_ms = Some(now_ms);
+                    Some(rt.record.project.clone())
+                } else {
+                    None
+                }
             }
+        } else {
+            None
         }
+    };
+
+    // Emit idle event for TUI
+    if let Some(project) = idle_project {
+        emit_agent_state_changed_event(&shared, agent_id, &project, AgentState::Idle);
     }
 
     persist_agents_runtime(shared).await;
@@ -922,14 +942,20 @@ async fn apply_stream_message(shared: &SharedState, agent_id: &str, msg: StreamM
     let now_ms = now_ms();
     let chat_messages = msg.to_chat_messages(now_ms);
 
+    // Note: Idle state detection is handled via:
+    // - Claude: Stop hook -> handle_agent_idle RPC
+    // - Codex: Turn completion in codex_run_turn
+
     let project = {
         let mut agents = shared.agents.lock().await;
         let Some(rt) = agents.agents.get_mut(agent_id) else {
             return;
         };
 
+        // Capture thread_id for Codex conversation resumption
         if let Some(thread_id) = msg.thread_id.clone() {
-            rt.codex_thread_id = Some(thread_id);
+            rt.codex_thread_id = Some(thread_id.clone());
+            rt.record.codex_thread_id = Some(thread_id);
         }
 
         for chat in &chat_messages {
@@ -988,6 +1014,36 @@ pub(in crate::daemon) fn emit_agent_deleted_event(
     let id = shared.next_event_id.fetch_add(1, Ordering::Relaxed);
     let _ = shared.events_tx.send(Event {
         r#type: murmur_protocol::EVT_AGENT_DELETED.to_owned(),
+        id: format!("evt-{id}"),
+        payload,
+    });
+}
+
+fn emit_agent_state_changed_event(
+    shared: &SharedState,
+    agent_id: &str,
+    project: &str,
+    state: AgentState,
+) {
+    let proto_state = match state {
+        AgentState::Starting => murmur_protocol::AgentState::Starting,
+        AgentState::Running => murmur_protocol::AgentState::Running,
+        AgentState::Idle => murmur_protocol::AgentState::Idle,
+        AgentState::NeedsResolution => murmur_protocol::AgentState::NeedsResolution,
+        AgentState::Exited => murmur_protocol::AgentState::Exited,
+        AgentState::Aborted => murmur_protocol::AgentState::Aborted,
+    };
+
+    let payload = serde_json::to_value(murmur_protocol::AgentIdleEvent {
+        agent_id: agent_id.to_owned(),
+        project: project.to_owned(),
+        state: proto_state,
+    })
+    .unwrap_or(serde_json::Value::Null);
+
+    let id = shared.next_event_id.fetch_add(1, Ordering::Relaxed);
+    let _ = shared.events_tx.send(Event {
+        r#type: murmur_protocol::EVT_AGENT_IDLE.to_owned(),
         id: format!("evt-{id}"),
         payload,
     });
@@ -1084,13 +1140,16 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
         let (outbound_tx, _) = mpsc::channel::<ChatMessage>(32);
         let (abort_tx, _) = watch::channel(false);
 
+        // Also restore codex_thread_id in the record for persistence
+        record.codex_thread_id = info.codex_thread_id.clone();
+
         let mut agents = shared.agents.lock().await;
         agents.agents.insert(
             info.id.clone(),
             AgentRuntime {
                 record,
                 backend,
-                codex_thread_id: None, // Lost on restart, Codex conversations can't resume
+                codex_thread_id: info.codex_thread_id.clone(),
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
                 outbound_tx,
