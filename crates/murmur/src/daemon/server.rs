@@ -9,8 +9,10 @@ use murmur_protocol::{
     MSG_AGENT_CHAT_HISTORY, MSG_AGENT_CLAIM, MSG_AGENT_CREATE, MSG_AGENT_DELETE,
     MSG_AGENT_DESCRIBE, MSG_AGENT_DONE, MSG_AGENT_IDLE, MSG_AGENT_LIST, MSG_AGENT_SEND_MESSAGE,
     MSG_AGENT_SYNC_COMMENTS, MSG_ATTACH, MSG_CLAIM_LIST, MSG_COMMIT_LIST, MSG_DETACH,
-    MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT, MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE, MSG_ISSUE_GET,
-    MSG_ISSUE_LIST, MSG_ISSUE_LIST_COMMENTS, MSG_ISSUE_PLAN, MSG_ISSUE_READY, MSG_ISSUE_UPDATE,
+    MSG_DIRECTOR_CHAT_HISTORY, MSG_DIRECTOR_CLEAR_HISTORY, MSG_DIRECTOR_SEND_MESSAGE,
+    MSG_DIRECTOR_START, MSG_DIRECTOR_STATUS, MSG_DIRECTOR_STOP, MSG_ISSUE_CLOSE,
+    MSG_ISSUE_COMMENT, MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE, MSG_ISSUE_GET, MSG_ISSUE_LIST,
+    MSG_ISSUE_LIST_COMMENTS, MSG_ISSUE_PLAN, MSG_ISSUE_READY, MSG_ISSUE_UPDATE,
     MSG_MANAGER_CHAT_HISTORY, MSG_MANAGER_CLEAR_HISTORY, MSG_MANAGER_SEND_MESSAGE,
     MSG_MANAGER_START, MSG_MANAGER_STATUS, MSG_MANAGER_STOP, MSG_ORCHESTRATION_START,
     MSG_ORCHESTRATION_STATUS, MSG_ORCHESTRATION_STOP, MSG_PERMISSION_LIST, MSG_PERMISSION_REQUEST,
@@ -298,6 +300,30 @@ async fn handle_connection(
             }
             MSG_MANAGER_CLEAR_HISTORY => {
                 let resp = rpc::handle_manager_clear_history(shared.clone(), req).await;
+                let _ = out_tx.send(Outbound::Response(resp)).await;
+            }
+            MSG_DIRECTOR_START => {
+                let resp = rpc::handle_director_start(shared.clone(), req).await;
+                let _ = out_tx.send(Outbound::Response(resp)).await;
+            }
+            MSG_DIRECTOR_STOP => {
+                let resp = rpc::handle_director_stop(shared.clone(), req).await;
+                let _ = out_tx.send(Outbound::Response(resp)).await;
+            }
+            MSG_DIRECTOR_STATUS => {
+                let resp = rpc::handle_director_status(&shared, req).await;
+                let _ = out_tx.send(Outbound::Response(resp)).await;
+            }
+            MSG_DIRECTOR_SEND_MESSAGE => {
+                let resp = rpc::handle_director_send_message(shared.clone(), req).await;
+                let _ = out_tx.send(Outbound::Response(resp)).await;
+            }
+            MSG_DIRECTOR_CHAT_HISTORY => {
+                let resp = rpc::handle_director_chat_history(&shared, req).await;
+                let _ = out_tx.send(Outbound::Response(resp)).await;
+            }
+            MSG_DIRECTOR_CLEAR_HISTORY => {
+                let resp = rpc::handle_director_clear_history(shared.clone(), req).await;
                 let _ = out_tx.send(Outbound::Response(resp)).await;
             }
             MSG_ISSUE_LIST => {

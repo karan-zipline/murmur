@@ -28,11 +28,19 @@ pub struct ManagerConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DirectorConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PermissionsFile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<Rule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manager: Option<ManagerConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub director: Option<DirectorConfig>,
 }
 
 pub fn rewrite_pattern(pattern: &str, cwd: &str, home_dir: &str) -> String {

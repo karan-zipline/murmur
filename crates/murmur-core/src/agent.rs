@@ -8,6 +8,7 @@ pub enum AgentRole {
     Coding,
     Planner,
     Manager,
+    Director,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]

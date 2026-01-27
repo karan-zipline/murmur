@@ -59,6 +59,7 @@ pub(in crate::daemon) fn agent_info_from_record(
             AgentRole::Coding => ProtoAgentRole::Coding,
             AgentRole::Planner => ProtoAgentRole::Planner,
             AgentRole::Manager => ProtoAgentRole::Manager,
+            AgentRole::Director => ProtoAgentRole::Director,
         },
         issue_id: record.issue_id.clone(),
         state: match record.state {

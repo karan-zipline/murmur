@@ -1288,9 +1288,10 @@ fn rebuild_question_index(model: &mut Model) {
 
 fn role_rank(role: murmur_protocol::AgentRole) -> u8 {
     match role {
-        murmur_protocol::AgentRole::Manager => 0,
-        murmur_protocol::AgentRole::Planner => 1,
-        murmur_protocol::AgentRole::Coding => 2,
+        murmur_protocol::AgentRole::Director => 0,
+        murmur_protocol::AgentRole::Manager => 1,
+        murmur_protocol::AgentRole::Planner => 2,
+        murmur_protocol::AgentRole::Coding => 3,
     }
 }
 

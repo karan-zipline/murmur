@@ -7,35 +7,37 @@ use murmur_protocol::{
     AgentCreateRequest, AgentCreateResponse, AgentDeleteRequest, AgentDescribeRequest,
     AgentDoneRequest, AgentIdleRequest, AgentListResponse, AgentSendMessageRequest,
     AgentSyncCommentsRequest, AgentSyncCommentsResponse, ClaimListRequest, ClaimListResponse,
-    CommitListRequest, CommitListResponse, IssueCommentRequest, IssueCommitRequest,
-    IssueCreateRequest, IssueCreateResponse, IssueGetRequest, IssueGetResponse, IssueListRequest,
-    IssueListResponse, IssuePlanRequest, IssueReadyRequest, IssueReadyResponse, IssueUpdateRequest,
-    IssueUpdateResponse, ManagerChatHistoryRequest, ManagerChatHistoryResponse,
-    ManagerClearHistoryRequest, ManagerSendMessageRequest, ManagerStartRequest,
-    ManagerStatusRequest, ManagerStatusResponse, ManagerStopRequest, OrchestrationStartRequest,
-    OrchestrationStatusRequest, OrchestrationStatusResponse, OrchestrationStopRequest,
-    PermissionListRequest, PermissionListResponse, PermissionRequestPayload,
-    PermissionRespondPayload, PermissionResponse, PingResponse, PlanChatHistoryRequest,
-    PlanChatHistoryResponse, PlanListRequest, PlanListResponse, PlanSendMessageRequest,
-    PlanShowRequest, PlanShowResponse, PlanStartRequest, PlanStartResponse, PlanStopRequest,
-    ProjectAddRequest, ProjectAddResponse, ProjectConfigGetRequest, ProjectConfigGetResponse,
-    ProjectConfigSetRequest, ProjectConfigShowRequest, ProjectConfigShowResponse,
-    ProjectListResponse, ProjectRemoveRequest, ProjectStatusRequest, ProjectStatusResponse,
-    Request, Response, StatsRequest, StatsResponse, UserQuestionListRequest,
-    UserQuestionListResponse, UserQuestionRequestPayload, UserQuestionRespondPayload,
-    UserQuestionResponse, MSG_AGENT_ABORT, MSG_AGENT_CHAT_HISTORY, MSG_AGENT_CLAIM,
-    MSG_AGENT_CREATE, MSG_AGENT_DELETE, MSG_AGENT_DESCRIBE, MSG_AGENT_DONE, MSG_AGENT_IDLE,
-    MSG_AGENT_LIST, MSG_AGENT_SEND_MESSAGE, MSG_AGENT_SYNC_COMMENTS, MSG_CLAIM_LIST,
-    MSG_COMMIT_LIST, MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT, MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE,
-    MSG_ISSUE_GET, MSG_ISSUE_LIST, MSG_ISSUE_PLAN, MSG_ISSUE_READY, MSG_ISSUE_UPDATE,
-    MSG_MANAGER_CHAT_HISTORY, MSG_MANAGER_CLEAR_HISTORY, MSG_MANAGER_SEND_MESSAGE,
-    MSG_MANAGER_START, MSG_MANAGER_STATUS, MSG_MANAGER_STOP, MSG_ORCHESTRATION_START,
-    MSG_ORCHESTRATION_STATUS, MSG_ORCHESTRATION_STOP, MSG_PERMISSION_LIST, MSG_PERMISSION_REQUEST,
-    MSG_PERMISSION_RESPOND, MSG_PING, MSG_PLAN_CHAT_HISTORY, MSG_PLAN_LIST, MSG_PLAN_SEND_MESSAGE,
-    MSG_PLAN_SHOW, MSG_PLAN_START, MSG_PLAN_STOP, MSG_PROJECT_ADD, MSG_PROJECT_CONFIG_GET,
-    MSG_PROJECT_CONFIG_SET, MSG_PROJECT_CONFIG_SHOW, MSG_PROJECT_LIST, MSG_PROJECT_REMOVE,
-    MSG_PROJECT_STATUS, MSG_QUESTION_LIST, MSG_QUESTION_REQUEST, MSG_QUESTION_RESPOND,
-    MSG_SHUTDOWN, MSG_STATS,
+    CommitListRequest, CommitListResponse, DirectorChatHistoryRequest, DirectorChatHistoryResponse,
+    DirectorSendMessageRequest, DirectorStartRequest, DirectorStartResponse, DirectorStatusResponse,
+    IssueCommentRequest, IssueCommitRequest, IssueCreateRequest, IssueCreateResponse,
+    IssueGetRequest, IssueGetResponse, IssueListRequest, IssueListResponse, IssuePlanRequest,
+    IssueReadyRequest, IssueReadyResponse, IssueUpdateRequest, IssueUpdateResponse,
+    ManagerChatHistoryRequest, ManagerChatHistoryResponse, ManagerClearHistoryRequest,
+    ManagerSendMessageRequest, ManagerStartRequest, ManagerStatusRequest, ManagerStatusResponse,
+    ManagerStopRequest, OrchestrationStartRequest, OrchestrationStatusRequest,
+    OrchestrationStatusResponse, OrchestrationStopRequest, PermissionListRequest,
+    PermissionListResponse, PermissionRequestPayload, PermissionRespondPayload, PermissionResponse,
+    PingResponse, PlanChatHistoryRequest, PlanChatHistoryResponse, PlanListRequest,
+    PlanListResponse, PlanSendMessageRequest, PlanShowRequest, PlanShowResponse, PlanStartRequest,
+    PlanStartResponse, PlanStopRequest, ProjectAddRequest, ProjectAddResponse,
+    ProjectConfigGetRequest, ProjectConfigGetResponse, ProjectConfigSetRequest,
+    ProjectConfigShowRequest, ProjectConfigShowResponse, ProjectListResponse, ProjectRemoveRequest,
+    ProjectStatusRequest, ProjectStatusResponse, Request, Response, StatsRequest, StatsResponse,
+    UserQuestionListRequest, UserQuestionListResponse, UserQuestionRequestPayload,
+    UserQuestionRespondPayload, UserQuestionResponse, MSG_AGENT_ABORT, MSG_AGENT_CHAT_HISTORY,
+    MSG_AGENT_CLAIM, MSG_AGENT_CREATE, MSG_AGENT_DELETE, MSG_AGENT_DESCRIBE, MSG_AGENT_DONE,
+    MSG_AGENT_IDLE, MSG_AGENT_LIST, MSG_AGENT_SEND_MESSAGE, MSG_AGENT_SYNC_COMMENTS, MSG_CLAIM_LIST,
+    MSG_COMMIT_LIST, MSG_DIRECTOR_CHAT_HISTORY, MSG_DIRECTOR_CLEAR_HISTORY, MSG_DIRECTOR_SEND_MESSAGE,
+    MSG_DIRECTOR_START, MSG_DIRECTOR_STATUS, MSG_DIRECTOR_STOP, MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT,
+    MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE, MSG_ISSUE_GET, MSG_ISSUE_LIST, MSG_ISSUE_PLAN,
+    MSG_ISSUE_READY, MSG_ISSUE_UPDATE, MSG_MANAGER_CHAT_HISTORY, MSG_MANAGER_CLEAR_HISTORY,
+    MSG_MANAGER_SEND_MESSAGE, MSG_MANAGER_START, MSG_MANAGER_STATUS, MSG_MANAGER_STOP,
+    MSG_ORCHESTRATION_START, MSG_ORCHESTRATION_STATUS, MSG_ORCHESTRATION_STOP, MSG_PERMISSION_LIST,
+    MSG_PERMISSION_REQUEST, MSG_PERMISSION_RESPOND, MSG_PING, MSG_PLAN_CHAT_HISTORY, MSG_PLAN_LIST,
+    MSG_PLAN_SEND_MESSAGE, MSG_PLAN_SHOW, MSG_PLAN_START, MSG_PLAN_STOP, MSG_PROJECT_ADD,
+    MSG_PROJECT_CONFIG_GET, MSG_PROJECT_CONFIG_SET, MSG_PROJECT_CONFIG_SHOW, MSG_PROJECT_LIST,
+    MSG_PROJECT_REMOVE, MSG_PROJECT_STATUS, MSG_QUESTION_LIST, MSG_QUESTION_REQUEST,
+    MSG_QUESTION_RESPOND, MSG_SHUTDOWN, MSG_STATS,
 };
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::UnixStream;
@@ -1055,6 +1057,113 @@ pub async fn manager_clear_history(paths: &MurmurPaths, project: String) -> anyh
     } else {
         Err(anyhow!(resp.error.unwrap_or_else(|| {
             "manager.clear_history failed".to_owned()
+        })))
+    }
+}
+
+// Director client functions
+
+pub async fn director_start(
+    paths: &MurmurPaths,
+    backend: Option<String>,
+) -> anyhow::Result<DirectorStartResponse> {
+    let payload = DirectorStartRequest { backend };
+    let req = Request {
+        r#type: MSG_DIRECTOR_START.to_owned(),
+        id: new_request_id("director-start"),
+        payload: serde_json::to_value(payload).context("serialize payload")?,
+    };
+    let resp = request_with_timeout(paths, req, Duration::from_secs(5 * 60)).await?;
+    if resp.success {
+        serde_json::from_value(resp.payload).context("parse director.start response")
+    } else {
+        Err(anyhow!(resp
+            .error
+            .unwrap_or_else(|| "director.start failed".to_owned())))
+    }
+}
+
+pub async fn director_stop(paths: &MurmurPaths) -> anyhow::Result<()> {
+    let req = Request {
+        r#type: MSG_DIRECTOR_STOP.to_owned(),
+        id: new_request_id("director-stop"),
+        payload: serde_json::Value::Null,
+    };
+    let resp = request(paths, req).await?;
+    if resp.success {
+        Ok(())
+    } else {
+        Err(anyhow!(resp
+            .error
+            .unwrap_or_else(|| "director.stop failed".to_owned())))
+    }
+}
+
+pub async fn director_status(paths: &MurmurPaths) -> anyhow::Result<DirectorStatusResponse> {
+    let req = Request {
+        r#type: MSG_DIRECTOR_STATUS.to_owned(),
+        id: new_request_id("director-status"),
+        payload: serde_json::Value::Null,
+    };
+    let resp = request(paths, req).await?;
+    if resp.success {
+        serde_json::from_value(resp.payload).context("parse director.status response")
+    } else {
+        Err(anyhow!(resp
+            .error
+            .unwrap_or_else(|| "director.status failed".to_owned())))
+    }
+}
+
+pub async fn director_send_message(paths: &MurmurPaths, message: String) -> anyhow::Result<()> {
+    let payload = DirectorSendMessageRequest { message };
+    let req = Request {
+        r#type: MSG_DIRECTOR_SEND_MESSAGE.to_owned(),
+        id: new_request_id("director-send"),
+        payload: serde_json::to_value(payload).context("serialize payload")?,
+    };
+    let resp = request_with_timeout(paths, req, Duration::from_secs(5 * 60)).await?;
+    if resp.success {
+        Ok(())
+    } else {
+        Err(anyhow!(resp
+            .error
+            .unwrap_or_else(|| "director.send_message failed".to_owned())))
+    }
+}
+
+pub async fn director_chat_history(
+    paths: &MurmurPaths,
+    limit: Option<u32>,
+) -> anyhow::Result<DirectorChatHistoryResponse> {
+    let payload = DirectorChatHistoryRequest { limit };
+    let req = Request {
+        r#type: MSG_DIRECTOR_CHAT_HISTORY.to_owned(),
+        id: new_request_id("director-chat-history"),
+        payload: serde_json::to_value(payload).context("serialize payload")?,
+    };
+    let resp = request(paths, req).await?;
+    if resp.success {
+        serde_json::from_value(resp.payload).context("parse director.chat_history response")
+    } else {
+        Err(anyhow!(resp.error.unwrap_or_else(|| {
+            "director.chat_history failed".to_owned()
+        })))
+    }
+}
+
+pub async fn director_clear_history(paths: &MurmurPaths) -> anyhow::Result<()> {
+    let req = Request {
+        r#type: MSG_DIRECTOR_CLEAR_HISTORY.to_owned(),
+        id: new_request_id("director-clear-history"),
+        payload: serde_json::Value::Null,
+    };
+    let resp = request(paths, req).await?;
+    if resp.success {
+        Ok(())
+    } else {
+        Err(anyhow!(resp.error.unwrap_or_else(|| {
+            "director.clear_history failed".to_owned()
         })))
     }
 }

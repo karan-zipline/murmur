@@ -48,6 +48,31 @@ pub async fn load_manager_allowed_patterns(paths: &MurmurPaths) -> Result<Vec<St
     }
 }
 
+pub async fn load_director_allowed_patterns(paths: &MurmurPaths) -> Result<Vec<String>> {
+    const DEFAULT: &[&str] = &["mm:*"];
+
+    let Some(cfg) = load_permissions_file(&paths.permissions_file).await? else {
+        return Ok(DEFAULT.iter().map(|s| s.to_string()).collect());
+    };
+
+    let Some(director) = cfg.director else {
+        return Ok(DEFAULT.iter().map(|s| s.to_string()).collect());
+    };
+
+    let patterns = director
+        .allowed_patterns
+        .into_iter()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+
+    if patterns.is_empty() {
+        Ok(DEFAULT.iter().map(|s| s.to_string()).collect())
+    } else {
+        Ok(patterns)
+    }
+}
+
 fn default_rules() -> Vec<Rule> {
     fn rule(tool: &str, action: Action, patterns: &[&str]) -> Rule {
         Rule {

@@ -129,6 +129,12 @@ fn draw_agents(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect
             line.push(Span::raw(" "));
 
             let (role_label, role_style) = match agent.role {
+                murmur_protocol::AgentRole::Director => (
+                    "dir",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 murmur_protocol::AgentRole::Manager => (
                     "mgr",
                     Style::default()
@@ -147,6 +153,9 @@ fn draw_agents(frame: &mut Frame<'_>, model: &Model, area: ratatui::layout::Rect
             line.push(Span::raw(" "));
 
             let id_style = match agent.role {
+                murmur_protocol::AgentRole::Director => Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
                 murmur_protocol::AgentRole::Manager => Style::default()
                     .fg(Color::Magenta)
                     .add_modifier(Modifier::BOLD),
@@ -607,6 +616,7 @@ fn draw_abort_confirm_overlay(frame: &mut Frame<'_>, model: &Model, area: Rect) 
     frame.render_widget(Clear, overlay);
 
     let title = match confirm.role {
+        murmur_protocol::AgentRole::Director => format!("Stop director {}", confirm.agent_id),
         murmur_protocol::AgentRole::Planner => format!("Stop planner {}", confirm.agent_id),
         _ => format!("Abort agent {}", confirm.agent_id),
     };

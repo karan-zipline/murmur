@@ -3,6 +3,7 @@ use murmur_protocol::{Request, Response};
 mod agent;
 mod claim;
 mod commit;
+mod director;
 mod issue;
 mod manager;
 mod orchestration;
@@ -24,6 +25,10 @@ pub(super) use issue::{
     handle_issue_close, handle_issue_comment, handle_issue_commit, handle_issue_create,
     handle_issue_get, handle_issue_list, handle_issue_list_comments, handle_issue_plan,
     handle_issue_ready, handle_issue_update,
+};
+pub(super) use director::{
+    handle_director_chat_history, handle_director_clear_history, handle_director_send_message,
+    handle_director_start, handle_director_status, handle_director_stop,
 };
 pub(super) use manager::{
     handle_manager_chat_history, handle_manager_clear_history, handle_manager_send_message,

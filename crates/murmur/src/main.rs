@@ -110,6 +110,10 @@ enum Command {
         #[command(subcommand)]
         command: ManagerCommand,
     },
+    Director {
+        #[command(subcommand)]
+        command: DirectorCommand,
+    },
     #[command(hide = true)]
     Permission {
         #[command(subcommand)]
@@ -569,6 +573,30 @@ enum ManagerCommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum DirectorCommand {
+    /// Start the director agent
+    Start {
+        #[arg(long)]
+        backend: Option<String>,
+    },
+    /// Stop the director agent
+    Stop,
+    /// Show director status
+    Status,
+    #[command(hide = true)]
+    SendMessage {
+        message: String,
+    },
+    #[command(hide = true)]
+    ChatHistory {
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    #[command(name = "clear", alias = "clear-history")]
+    ClearHistory,
+}
+
+#[derive(Subcommand, Debug)]
 enum PermissionCommand {
     List,
     Respond {
@@ -730,6 +758,7 @@ async fn dispatch(command: Command, paths: &MurmurPaths) -> anyhow::Result<()> {
         Command::Hook { command } => dispatch_hook(command, paths).await,
         Command::Plan { command } => dispatch_plan(command, paths).await,
         Command::Manager { command } => dispatch_manager(command, paths).await,
+        Command::Director { command } => dispatch_director(command, paths).await,
         Command::Permission { command } => dispatch_permission(command, paths).await,
         Command::Question { command } => dispatch_question(command, paths).await,
         Command::Internal { command } => dispatch_internal(command).await,
@@ -857,6 +886,53 @@ async fn dispatch_manager(command: ManagerCommand, paths: &MurmurPaths) -> anyho
         }
         ManagerCommand::ClearHistory { project } => {
             client::manager_clear_history(paths, project).await?;
+            println!("ok");
+            Ok(())
+        }
+    }
+}
+
+async fn dispatch_director(command: DirectorCommand, paths: &MurmurPaths) -> anyhow::Result<()> {
+    match command {
+        DirectorCommand::Start { backend } => {
+            let resp = client::director_start(paths, backend).await?;
+            println!("{}", resp.id);
+            Ok(())
+        }
+        DirectorCommand::Stop => {
+            client::director_stop(paths).await?;
+            println!("ok");
+            Ok(())
+        }
+        DirectorCommand::Status => {
+            let resp = client::director_status(paths).await?;
+            if resp.running {
+                println!("running");
+                if let Some(state) = resp.state {
+                    println!("state\t{}", format_agent_state(state));
+                }
+                if let Some(backend) = resp.backend.as_deref() {
+                    println!("backend\t{}", backend);
+                }
+            } else {
+                println!("stopped");
+            }
+            Ok(())
+        }
+        DirectorCommand::SendMessage { message } => {
+            client::director_send_message(paths, message).await?;
+            println!("ok");
+            Ok(())
+        }
+        DirectorCommand::ChatHistory { limit } => {
+            let resp = client::director_chat_history(paths, limit).await?;
+            for m in resp.messages {
+                println!("{}\t{}", format_chat_role(m.role), m.content);
+            }
+            Ok(())
+        }
+        DirectorCommand::ClearHistory => {
+            client::director_clear_history(paths).await?;
             println!("ok");
             Ok(())
         }
@@ -1402,6 +1478,7 @@ fn format_agent_role(role: murmur_protocol::AgentRole) -> &'static str {
         murmur_protocol::AgentRole::Coding => "coding",
         murmur_protocol::AgentRole::Planner => "planner",
         murmur_protocol::AgentRole::Manager => "manager",
+        murmur_protocol::AgentRole::Director => "director",
     }
 }
 

@@ -1147,6 +1147,7 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
             murmur_protocol::AgentRole::Coding => AgentRole::Coding,
             murmur_protocol::AgentRole::Planner => AgentRole::Planner,
             murmur_protocol::AgentRole::Manager => AgentRole::Manager,
+            murmur_protocol::AgentRole::Director => AgentRole::Director,
         };
 
         // Convert backend string to enum

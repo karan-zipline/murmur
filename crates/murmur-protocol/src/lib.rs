@@ -62,6 +62,13 @@ pub const MSG_MANAGER_SEND_MESSAGE: &str = "manager.send_message";
 pub const MSG_MANAGER_CHAT_HISTORY: &str = "manager.chat_history";
 pub const MSG_MANAGER_CLEAR_HISTORY: &str = "manager.clear_history";
 
+pub const MSG_DIRECTOR_START: &str = "director.start";
+pub const MSG_DIRECTOR_STOP: &str = "director.stop";
+pub const MSG_DIRECTOR_STATUS: &str = "director.status";
+pub const MSG_DIRECTOR_SEND_MESSAGE: &str = "director.send_message";
+pub const MSG_DIRECTOR_CHAT_HISTORY: &str = "director.chat_history";
+pub const MSG_DIRECTOR_CLEAR_HISTORY: &str = "director.clear_history";
+
 pub const EVT_HEARTBEAT: &str = "heartbeat";
 pub const EVT_AGENT_CHAT: &str = "agent.chat";
 pub const EVT_AGENT_CREATED: &str = "agent.created";
@@ -266,6 +273,7 @@ pub enum AgentRole {
     Coding,
     Planner,
     Manager,
+    Director,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -633,6 +641,43 @@ pub struct ManagerChatHistoryResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagerClearHistoryRequest {
     pub project: String,
+}
+
+// Director (global singleton) request/response types
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectorStartRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectorStartResponse {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectorStatusResponse {
+    pub running: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<AgentState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectorSendMessageRequest {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectorChatHistoryRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectorChatHistoryResponse {
+    pub messages: Vec<ChatMessage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
