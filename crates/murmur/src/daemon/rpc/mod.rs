@@ -16,14 +16,14 @@ mod stats;
 pub(super) use agent::{
     handle_agent_abort, handle_agent_chat_history, handle_agent_claim, handle_agent_create,
     handle_agent_delete, handle_agent_describe, handle_agent_done, handle_agent_idle,
-    handle_agent_list, handle_agent_send_message,
+    handle_agent_list, handle_agent_send_message, handle_agent_sync_comments,
 };
 pub(super) use claim::handle_claim_list;
 pub(super) use commit::handle_commit_list;
 pub(super) use issue::{
     handle_issue_close, handle_issue_comment, handle_issue_commit, handle_issue_create,
-    handle_issue_get, handle_issue_list, handle_issue_plan, handle_issue_ready,
-    handle_issue_update,
+    handle_issue_get, handle_issue_list, handle_issue_list_comments, handle_issue_plan,
+    handle_issue_ready, handle_issue_update,
 };
 pub(super) use manager::{
     handle_manager_chat_history, handle_manager_clear_history, handle_manager_send_message,

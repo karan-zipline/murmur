@@ -374,6 +374,22 @@ mm agent describe <TEXT>
 Requires: MURMUR_AGENT_ID environment variable
 ```
 
+### `mm agent sync-comments`
+
+Manually fetch and inject new comments for an agent.
+
+```bash
+mm agent sync-comments <AGENT_ID>
+```
+
+This fetches any new comments on the agent's claimed issue and delivers them to the agent. Useful for testing or when automatic comment polling is disabled.
+
+**Example:**
+```bash
+mm agent sync-comments a-1
+# Output: Injected 2 comment(s)
+```
+
 ---
 
 ## Planner Commands

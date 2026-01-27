@@ -48,10 +48,10 @@ Agent metadata is persisted to `runtime/agents.json` after spawn and state chang
 - Agent ID, project, role, issue ID
 - Worktree directory, PID, exit code
 - Backend type (claude/codex)
+- Codex thread ID (enables conversation resumption)
 
 **What is lost on restart:**
 - Chat history (in-memory only)
-- Codex thread IDs (conversations cannot resume)
 - Active Tokio tasks and channels
 
 ---
@@ -64,8 +64,8 @@ Murmur decomplects agent state into:
 
 `AgentRecord` (`murmur-core`) is an immutable value updated via explicit events:
 - identity: `id`, `project`, `role`, `issue_id`
-- state: `starting|running|needs_resolution|exited|aborted`
-- metadata: timestamps, worktree dir, optional `description`, optional `pid`/exit info
+- state: `starting|running|idle|needs_resolution|exited|aborted`
+- metadata: timestamps, worktree dir, optional `description`, optional `pid`/exit info, optional `codex_thread_id`
 
 ### `AgentRuntime` (imperative shell state)
 
@@ -78,6 +78,23 @@ Murmur decomplects agent state into:
 - Tokio tasks for stream reading / message delivery
 
 Only the daemon owns `AgentRuntime`.
+
+---
+
+## Idle State
+
+Agents can transition to an **Idle** state when they finish processing and are waiting for user input:
+
+**Idle detection:**
+- Claude: Detected when `stop_reason == "end_turn"` with no pending tool calls
+- Codex: Detected after turn completion
+
+**State transitions:**
+- `Running` → `Idle`: When agent finishes processing and awaits input
+- `Idle` → `Running`: When agent receives a new message via `agent send-message`
+- `Idle` → `Exited`/`Aborted`: Terminal states are reachable from Idle
+
+The TUI displays idle agents with a "◦" indicator in yellow.
 
 ---
 
@@ -110,7 +127,9 @@ See `docs/components/WORKTREES_AND_MERGE.md`.
 
 ### Codex CLI (`codex`)
 
-- Best-effort “resume” using a thread id (backend dependent)
+- Supports conversation resumption via thread ID
+- Thread IDs are extracted from `thread.started` events and persisted
+- On subsequent messages, Murmur uses `codex exec ... resume <thread_id> <prompt>`
 - Produces a JSONL stream parsed into canonical chat messages
 - Tool approvals are handled by Codex itself (Murmur cannot intercept tool execution)
 

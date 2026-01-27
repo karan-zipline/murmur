@@ -110,3 +110,25 @@ CLI usage:
 or
 
 `mm issue plan <project> <id> --body "..."`.
+
+---
+
+## Comment Polling
+
+The daemon can poll claimed issues for new comments and inject them into the agent's chat.
+
+Supported by:
+- **GitHub** — fetches comments via GraphQL, filters by creation time
+- **Linear** — fetches comments via GraphQL, filters by creation time
+- **`tk`** — not supported (returns error; comments are stored in issue body)
+
+Comments are deduplicated using a shared `DedupStore` to prevent duplicate delivery.
+
+Configuration (in `config.toml`):
+```toml
+[polling]
+comment-polling-enabled = true  # default: true
+comment-interval-secs = 10      # default: 10
+```
+
+Manual sync: `mm agent sync-comments <agent-id>`

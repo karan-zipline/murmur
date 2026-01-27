@@ -296,6 +296,11 @@ enum AgentCommand {
         #[arg(long)]
         error: Option<String>,
     },
+    #[command(
+        about = "Fetch and inject new comments for an agent",
+        long_about = "Manually trigger comment sync for a specific agent.\n\nThis fetches any new comments on the agent's claimed issue and delivers them to the agent."
+    )]
+    SyncComments { agent_id: String },
 }
 
 #[derive(Args, Debug)]
@@ -1270,6 +1275,11 @@ async fn dispatch_agent(command: AgentCommand, paths: &MurmurPaths) -> anyhow::R
             let agent_id = require_agent_id_env()?;
             client::agent_done(paths, agent_id, task, error).await?;
             println!("ok");
+            Ok(())
+        }
+        AgentCommand::SyncComments { agent_id } => {
+            let resp = client::agent_sync_comments(paths, agent_id).await?;
+            println!("Injected {} comment(s)", resp.comments_injected);
             Ok(())
         }
         AgentCommand::Plan(args) => dispatch_agent_plan(args, paths).await,

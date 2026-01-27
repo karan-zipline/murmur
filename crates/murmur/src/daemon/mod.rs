@@ -18,12 +18,14 @@ use tokio::io::{BufReader, BufWriter};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::config_store;
+use crate::dedup_store::DedupStore;
 use crate::git::Git;
 use crate::ipc::jsonl::{read_jsonl, write_jsonl};
 use crate::runtime_store;
 use crate::worktrees::WorktreeManager;
 
 mod claude;
+mod comment_poller;
 mod issue_backend;
 mod merge;
 mod orchestration;
@@ -78,6 +80,18 @@ pub async fn run_foreground(paths: &MurmurPaths) -> anyhow::Result<()> {
     let next_agent_id = detect_next_agent_id_seed(paths, &git).await;
     let next_plan_id = detect_next_plan_id_seed(paths).await;
 
+    // Create shared dedup store for webhooks and comment polling
+    let dedup_path = paths.runtime_dir.join("dedup.json");
+    let dedup_store = match DedupStore::load(dedup_path, now_ms()).await {
+        Ok(store) => Arc::new(tokio::sync::Mutex::new(store)),
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to load dedup store, using empty");
+            Arc::new(tokio::sync::Mutex::new(DedupStore::new(
+                paths.runtime_dir.join("dedup.json"),
+            )))
+        }
+    };
+
     let shared = Arc::new(SharedState {
         pid,
         started_at,
@@ -99,6 +113,7 @@ pub async fn run_foreground(paths: &MurmurPaths) -> anyhow::Result<()> {
         orchestrators: tokio::sync::Mutex::new(std::collections::BTreeMap::new()),
         merge_locks: tokio::sync::Mutex::new(std::collections::BTreeMap::new()),
         commits: tokio::sync::Mutex::new(std::collections::BTreeMap::new()),
+        dedup: dedup_store.clone(),
     });
 
     // Restore agents from disk so that agents from previous sessions are recognized
@@ -111,12 +126,33 @@ pub async fn run_foreground(paths: &MurmurPaths) -> anyhow::Result<()> {
     tokio::spawn({
         let shared = shared.clone();
         let shutdown_rx = shutdown_rx.clone();
+        let dedup = dedup_store.clone();
         async move {
-            if let Err(err) = webhook::maybe_start_webhook_server(shared, shutdown_rx).await {
+            if let Err(err) = webhook::maybe_start_webhook_server(shared, shutdown_rx, dedup).await
+            {
                 tracing::warn!(error = %err, "webhook server failed");
             }
         }
     });
+
+    // Start comment poller if enabled
+    {
+        let cfg = shared.config.lock().await;
+        let polling_cfg = cfg.polling.clone().unwrap_or_default();
+        if polling_cfg.comment_polling_enabled {
+            let poll_interval =
+                Duration::from_secs(polling_cfg.comment_interval_secs.max(1));
+            let poller = comment_poller::CommentPoller::new(
+                shared.clone(),
+                poll_interval,
+                shutdown_rx.clone(),
+            );
+            let dedup = dedup_store.clone();
+            tokio::spawn(async move {
+                poller.run(dedup).await;
+            });
+        }
+    }
 
     tracing::info!("daemon starting (foreground)");
     tracing::info!(socket = %paths.socket_path.display(), "daemon bound socket");
@@ -193,6 +229,7 @@ async fn spawn_agent_without_issue(
                 codex_thread_id: None,
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
+                claim_started_at_ms: None, // No issue assigned yet
                 outbound_tx: outbound_tx.clone(),
                 abort_tx: abort_tx.clone(),
                 tasks: Vec::new(),
@@ -355,6 +392,7 @@ async fn spawn_agent_with_kickoff(
                 codex_thread_id: None,
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
+                claim_started_at_ms: Some(created_at_ms), // Track when issue was claimed
                 outbound_tx: outbound_tx.clone(),
                 abort_tx: abort_tx.clone(),
                 tasks: Vec::new(),
@@ -1152,6 +1190,7 @@ async fn rehydrate_agents(shared: Arc<SharedState>) -> anyhow::Result<()> {
                 codex_thread_id: info.codex_thread_id.clone(),
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
+                claim_started_at_ms: None, // Will be set by comment poller on first poll
                 outbound_tx,
                 abort_tx,
                 tasks: Vec::new(),

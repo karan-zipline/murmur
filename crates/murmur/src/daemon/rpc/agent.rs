@@ -8,10 +8,11 @@ use murmur_core::config::{AgentBackend, MergeStrategy};
 use murmur_protocol::{
     AgentAbortRequest, AgentChatHistoryRequest, AgentChatHistoryResponse, AgentClaimRequest,
     AgentCreateRequest, AgentCreateResponse, AgentDeleteRequest, AgentDescribeRequest,
-    AgentDoneRequest, AgentIdleRequest, AgentListResponse, AgentSendMessageRequest, Event, Request,
-    Response, EVT_AGENT_IDLE, MSG_AGENT_ABORT, MSG_AGENT_CHAT_HISTORY, MSG_AGENT_CLAIM,
-    MSG_AGENT_CREATE, MSG_AGENT_DELETE, MSG_AGENT_DESCRIBE, MSG_AGENT_DONE, MSG_AGENT_IDLE,
-    MSG_AGENT_LIST, MSG_AGENT_SEND_MESSAGE,
+    AgentDoneRequest, AgentIdleRequest, AgentListResponse, AgentSendMessageRequest,
+    AgentSyncCommentsRequest, AgentSyncCommentsResponse, Event, Request, Response, EVT_AGENT_IDLE,
+    MSG_AGENT_ABORT, MSG_AGENT_CHAT_HISTORY, MSG_AGENT_CLAIM, MSG_AGENT_CREATE, MSG_AGENT_DELETE,
+    MSG_AGENT_DESCRIBE, MSG_AGENT_DONE, MSG_AGENT_IDLE, MSG_AGENT_LIST, MSG_AGENT_SEND_MESSAGE,
+    MSG_AGENT_SYNC_COMMENTS,
 };
 
 use crate::github::{parse_github_nwo, GithubBackend};
@@ -361,6 +362,7 @@ pub(in crate::daemon) async fn handle_agent_claim(
     rt.record = rt
         .record
         .apply_event(AgentEvent::AssignedIssue { issue_id }, now_ms);
+    rt.claim_started_at_ms = Some(now_ms);
 
     drop(claims);
     drop(agents);
@@ -992,5 +994,98 @@ pub(in crate::daemon) async fn handle_agent_idle(
         success: true,
         error: None,
         payload: serde_json::Value::Null,
+    }
+}
+
+pub(in crate::daemon) async fn handle_agent_sync_comments(
+    shared: Arc<SharedState>,
+    mut req: Request,
+) -> Response {
+    let payload = std::mem::take(&mut req.payload);
+    let parsed: Result<AgentSyncCommentsRequest, _> = serde_json::from_value(payload);
+    let sync = match parsed {
+        Ok(v) => v,
+        Err(err) => return error_response(req, &format!("invalid payload: {err}")),
+    };
+
+    let agent_id = sync.agent_id.trim();
+    if agent_id.is_empty() {
+        return error_response(req, "agent_id is required");
+    }
+
+    // Get agent info
+    let (project, issue_id, since_ms, outbound_tx) = {
+        let agents = shared.agents.lock().await;
+        let Some(rt) = agents.agents.get(agent_id) else {
+            return error_response(req, "agent not found");
+        };
+        let issue_id = rt.record.issue_id.clone();
+        if issue_id.trim().is_empty() {
+            return error_response(req, "agent has no claimed issue");
+        }
+        (
+            rt.record.project.clone(),
+            issue_id,
+            rt.claim_started_at_ms,
+            rt.outbound_tx.clone(),
+        )
+    };
+
+    // If no claim time, use now (agent was rehydrated)
+    let since_ms = since_ms.unwrap_or_else(now_ms);
+
+    // Get issue backend
+    let backend = match issue_backend_for_project(shared.as_ref(), &project).await {
+        Ok(v) => v,
+        Err(msg) => return error_response(req, &msg),
+    };
+
+    // List comments since claim time
+    let comments = match backend.list_comments(&issue_id, Some(since_ms)).await {
+        Ok(c) => c,
+        Err(e) => return error_response(req, &format!("failed to list comments: {e:#}")),
+    };
+
+    // Deliver each new comment
+    let now = now_ms();
+    let mut injected = 0u32;
+    for comment in comments {
+        let dedup_id = format!("comment:{}:{}:{}", project, issue_id, comment.id);
+
+        let is_new = {
+            let mut store = shared.dedup.lock().await;
+            store.mark(&dedup_id, Some(&project), now)
+        };
+
+        if is_new {
+            let msg = format!(
+                "New comment on issue #{} from {}:\n\n{}",
+                issue_id, comment.author, comment.body
+            );
+
+            let chat_msg = ChatMessage::new(ChatRole::User, msg, now);
+
+            if outbound_tx.try_send(chat_msg).is_ok() {
+                injected += 1;
+                tracing::info!(
+                    agent_id = %agent_id,
+                    issue_id = %issue_id,
+                    comment_author = %comment.author,
+                    "delivered comment to agent via sync"
+                );
+            }
+        }
+    }
+
+    let payload = AgentSyncCommentsResponse {
+        comments_injected: injected,
+    };
+
+    Response {
+        r#type: MSG_AGENT_SYNC_COMMENTS.to_owned(),
+        id: req.id,
+        success: true,
+        error: None,
+        payload: serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
     }
 }

@@ -8,6 +8,7 @@ Code pointers:
 - Shared state model: `crates/murmur/src/daemon/state.rs`
 - RPC handlers: `crates/murmur/src/daemon/rpc/`
 - Webhooks: `crates/murmur/src/daemon/webhook.rs`
+- Comment poller: `crates/murmur/src/daemon/comment_poller.rs`
 
 See also:
 - `docs/components/IPC.md`
@@ -27,6 +28,7 @@ The daemon is the control plane. It owns:
 - Pending permission requests and user questions.
 - Event broadcast stream used by attached clients (`attach`).
 - Optional webhook server (tick requests).
+- Optional comment poller (injects new issue comments into agents).
 
 The daemon does *not* implement business rules as side-effecting code:
 - Pure logic lives in `murmur-core` (e.g. orchestration tick decisions, parsing, plan upserts).
@@ -48,7 +50,8 @@ The daemon does *not* implement business rules as side-effecting code:
    - Agents with dead processes are marked as `Exited`.
 5. Start the Unix socket server (`murmur.sock`). By default, the socket is placed under `~/.murmur/murmur.sock` (or `$MURMUR_DIR/murmur.sock` when `MURMUR_DIR` is set). When `MURMUR_SOCKET_PATH` is set, it overrides the socket path.
 6. Start webhook server if enabled.
-7. Autostart orchestrators for projects with `autostart = true`.
+7. Start comment poller if enabled (polls claimed issues for new comments).
+8. Autostart orchestrators for projects with `autostart = true`.
 
 ---
 
@@ -82,6 +85,7 @@ Key fields:
 - `pending_permissions`, `pending_questions` — requests blocked on user response.
 - `completed_issues` — per-project set of issue ids completed in this daemon lifetime.
 - `commits` — per-project in-memory commit log used for `stats` (and future UIs).
+- `dedup` — shared deduplication store (prevents duplicate webhook/comment processing).
 
 Persistence is intentionally best-effort; see `docs/components/STORAGE.md`.
 

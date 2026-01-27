@@ -165,6 +165,7 @@ pub(in crate::daemon) async fn handle_manager_start(
                 codex_thread_id: None,
                 chat: ChatHistory::new(DEFAULT_CHAT_CAPACITY),
                 last_idle_at_ms: None,
+                claim_started_at_ms: None, // Manager doesn't have an issue
                 outbound_tx: outbound_tx.clone(),
                 abort_tx,
                 tasks: Vec::new(),

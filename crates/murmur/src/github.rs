@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::{anyhow, Context as _};
-use murmur_core::issue::{CreateParams, Issue, ListFilter, Status, UpdateParams};
+use murmur_core::issue::{Comment, CreateParams, Issue, ListFilter, Status, UpdateParams};
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -577,6 +577,96 @@ impl GithubBackend {
             .context("github add comment")?;
 
         Ok(())
+    }
+
+    /// List comments on an issue, optionally filtering to those created after `since_ms`.
+    pub async fn list_comments(
+        &self,
+        id: &str,
+        since_ms: Option<u64>,
+    ) -> anyhow::Result<Vec<Comment>> {
+        let num = parse_issue_number(id)?;
+
+        let query = r#"
+            query GetIssueComments($owner: String!, $repo: String!, $number: Int!, $first: Int!) {
+                repository(owner: $owner, name: $repo) {
+                    issue(number: $number) {
+                        comments(first: $first, orderBy: {field: UPDATED_AT, direction: ASC}) {
+                            nodes {
+                                id
+                                body
+                                createdAt
+                                author { login }
+                            }
+                        }
+                    }
+                }
+            }
+        "#;
+
+        #[derive(Debug, Deserialize)]
+        struct Data {
+            repository: Repository,
+        }
+        #[derive(Debug, Deserialize)]
+        struct Repository {
+            issue: IssueData,
+        }
+        #[derive(Debug, Deserialize)]
+        struct IssueData {
+            comments: CommentsConnection,
+        }
+        #[derive(Debug, Deserialize)]
+        struct CommentsConnection {
+            nodes: Vec<CommentNode>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct CommentNode {
+            id: String,
+            body: String,
+            #[serde(rename = "createdAt")]
+            created_at: String,
+            author: Option<Author>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct Author {
+            login: String,
+        }
+
+        let data: Data = self
+            .graphql(
+                query,
+                Some(serde_json::json!({
+                    "owner": self.owner,
+                    "repo": self.repo,
+                    "number": num,
+                    "first": 100,
+                })),
+                None,
+            )
+            .await
+            .context("github list comments")?;
+
+        let mut comments = Vec::new();
+        for node in data.repository.issue.comments.nodes {
+            let created_at_ms = parse_rfc3339_ms(&node.created_at).unwrap_or(0);
+
+            // Filter by since_ms if provided
+            if let Some(since) = since_ms {
+                if created_at_ms <= since {
+                    continue;
+                }
+            }
+
+            comments.push(Comment {
+                id: node.id,
+                author: node.author.map(|a| a.login).unwrap_or_default(),
+                body: node.body,
+                created_at_ms,
+            });
+        }
+
+        Ok(comments)
     }
 
     pub async fn create_pull_request(

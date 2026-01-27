@@ -13,6 +13,7 @@ use murmur_protocol::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
+use crate::dedup_store::DedupStore;
 use crate::git::Git;
 
 use super::DaemonHandle;
@@ -25,6 +26,8 @@ pub(super) struct AgentRuntime {
     pub(super) codex_thread_id: Option<String>,
     pub(super) chat: ChatHistory,
     pub(super) last_idle_at_ms: Option<u64>,
+    /// Timestamp when the agent claimed the issue (for comment polling).
+    pub(super) claim_started_at_ms: Option<u64>,
     pub(super) outbound_tx: mpsc::Sender<ChatMessage>,
     pub(super) abort_tx: watch::Sender<bool>,
     pub(super) tasks: Vec<tokio::task::JoinHandle<()>>,
@@ -165,4 +168,5 @@ pub(super) struct SharedState {
     pub(super) orchestrators: tokio::sync::Mutex<BTreeMap<String, OrchestratorRuntime>>,
     pub(super) merge_locks: tokio::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub(super) commits: tokio::sync::Mutex<BTreeMap<String, CommitLog>>,
+    pub(super) dedup: Arc<tokio::sync::Mutex<DedupStore>>,
 }

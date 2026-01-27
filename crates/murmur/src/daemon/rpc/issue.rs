@@ -1,9 +1,10 @@
 use murmur_protocol::{
-    IssueCommentRequest, IssueCommitRequest, IssueCreateRequest, IssueCreateResponse,
-    IssueGetRequest, IssueGetResponse, IssueListRequest, IssueListResponse, IssuePlanRequest,
-    IssueReadyRequest, IssueReadyResponse, IssueUpdateRequest, IssueUpdateResponse, Request,
-    Response, MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT, MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE,
-    MSG_ISSUE_GET, MSG_ISSUE_LIST, MSG_ISSUE_PLAN, MSG_ISSUE_READY, MSG_ISSUE_UPDATE,
+    IssueComment, IssueCommentRequest, IssueCommitRequest, IssueCreateRequest, IssueCreateResponse,
+    IssueGetRequest, IssueGetResponse, IssueListCommentsRequest, IssueListCommentsResponse,
+    IssueListRequest, IssueListResponse, IssuePlanRequest, IssueReadyRequest, IssueReadyResponse,
+    IssueUpdateRequest, IssueUpdateResponse, Request, Response, MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT,
+    MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE, MSG_ISSUE_GET, MSG_ISSUE_LIST, MSG_ISSUE_LIST_COMMENTS,
+    MSG_ISSUE_PLAN, MSG_ISSUE_READY, MSG_ISSUE_UPDATE,
 };
 
 use super::super::{
@@ -325,5 +326,47 @@ pub(in crate::daemon) async fn handle_issue_commit(
         success: true,
         error: None,
         payload: serde_json::Value::Null,
+    }
+}
+
+pub(in crate::daemon) async fn handle_issue_list_comments(
+    shared: &SharedState,
+    mut req: Request,
+) -> Response {
+    let payload = std::mem::take(&mut req.payload);
+    let parsed: Result<IssueListCommentsRequest, _> = serde_json::from_value(payload);
+    let list_req = match parsed {
+        Ok(v) => v,
+        Err(err) => return error_response(req, &format!("invalid payload: {err}")),
+    };
+
+    let backend = match issue_backend_for_project(shared, &list_req.project).await {
+        Ok(v) => v,
+        Err(msg) => return error_response(req, &msg),
+    };
+
+    let comments = match backend.list_comments(&list_req.issue_id, list_req.since_ms).await {
+        Ok(v) => v,
+        Err(err) => return error_response(req, &format!("{err:#}")),
+    };
+
+    let payload = IssueListCommentsResponse {
+        comments: comments
+            .into_iter()
+            .map(|c| IssueComment {
+                id: c.id,
+                author: c.author,
+                body: c.body,
+                created_at_ms: c.created_at_ms,
+            })
+            .collect(),
+    };
+
+    Response {
+        r#type: MSG_ISSUE_LIST_COMMENTS.to_owned(),
+        id: req.id,
+        success: true,
+        error: None,
+        payload: serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
     }
 }

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{anyhow, Context as _};
 use murmur_core::issue::{
-    compute_ready_issues, CreateParams, Issue, ListFilter, Status, UpdateParams,
+    compute_ready_issues, Comment, CreateParams, Issue, ListFilter, Status, UpdateParams,
 };
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
@@ -530,6 +530,89 @@ impl LinearBackend {
         }
 
         Ok(())
+    }
+
+    /// List comments on an issue, optionally filtering to those created after `since_ms`.
+    pub async fn list_comments(
+        &self,
+        id: &str,
+        since_ms: Option<u64>,
+    ) -> anyhow::Result<Vec<Comment>> {
+        let issue_id = self.resolve_issue_id(id).await?;
+
+        let query = r#"
+            query IssueComments($issueId: String!, $first: Int!) {
+                issue(id: $issueId) {
+                    comments(first: $first, orderBy: createdAt) {
+                        nodes {
+                            id
+                            body
+                            createdAt
+                            user {
+                                name
+                            }
+                        }
+                    }
+                }
+            }
+        "#;
+
+        #[derive(Debug, Deserialize)]
+        struct Data {
+            issue: IssueData,
+        }
+        #[derive(Debug, Deserialize)]
+        struct IssueData {
+            comments: CommentsConnection,
+        }
+        #[derive(Debug, Deserialize)]
+        struct CommentsConnection {
+            nodes: Vec<CommentNode>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct CommentNode {
+            id: String,
+            body: String,
+            #[serde(rename = "createdAt")]
+            created_at: String,
+            user: Option<User>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct User {
+            name: String,
+        }
+
+        let data: Data = self
+            .graphql(
+                query,
+                Some(serde_json::json!({
+                    "issueId": issue_id,
+                    "first": 100,
+                })),
+            )
+            .await
+            .context("linear list comments")?;
+
+        let mut comments = Vec::new();
+        for node in data.issue.comments.nodes {
+            let created_at_ms = parse_rfc3339_ms(&node.created_at).unwrap_or(0);
+
+            // Filter by since_ms if provided
+            if let Some(since) = since_ms {
+                if created_at_ms <= since {
+                    continue;
+                }
+            }
+
+            comments.push(Comment {
+                id: node.id,
+                author: node.user.map(|u| u.name).unwrap_or_default(),
+                body: node.body,
+                created_at_ms,
+            });
+        }
+
+        Ok(comments)
     }
 
     pub async fn commit(&self) -> anyhow::Result<()> {

@@ -77,8 +77,9 @@ Notes:
   - Agents whose worktrees still exist are restored to the in-memory registry.
   - Process liveness is checked via `/proc/<pid>`.
   - Live processes are marked `Running`; dead processes are marked `Exited`.
+  - Codex thread IDs are restored, enabling conversation resumption.
   - This allows `mm agent claim` and `mm agent done` to work for agents spawned in previous daemon sessions.
-  - Note: Chat history and Codex thread IDs are lost on restart; only agent metadata is preserved.
+  - Note: Chat history is lost on restart (in-memory only); agent metadata and Codex thread IDs are preserved.
 
 ### Webhook dedup (`runtime/dedup.json`)
 

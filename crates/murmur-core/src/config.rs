@@ -26,6 +26,9 @@ pub struct ConfigFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhook: Option<WebhookConfig>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polling: Option<PollingConfig>,
+
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, toml::Value>,
 }
@@ -67,6 +70,50 @@ impl WebhookConfig {
             DEFAULT_WEBHOOK_PATH_PREFIX
         } else {
             trimmed
+        }
+    }
+}
+
+/// Configuration for background polling tasks.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PollingConfig {
+    /// Enable/disable comment polling (default: true)
+    #[serde(
+        default = "PollingConfig::default_comment_polling_enabled",
+        rename = "comment-polling-enabled",
+        alias = "comment_polling_enabled"
+    )]
+    pub comment_polling_enabled: bool,
+
+    /// Comment poll interval in seconds (default: 10)
+    #[serde(
+        default = "PollingConfig::default_comment_interval_secs",
+        rename = "comment-interval-secs",
+        alias = "comment_interval_secs"
+    )]
+    pub comment_interval_secs: u64,
+}
+
+pub const DEFAULT_COMMENT_POLL_INTERVAL_SECS: u64 = 10;
+
+impl PollingConfig {
+    fn default_comment_polling_enabled() -> bool {
+        true
+    }
+
+    fn default_comment_interval_secs() -> u64 {
+        DEFAULT_COMMENT_POLL_INTERVAL_SECS
+    }
+
+    pub fn effective_comment_polling_enabled(&self) -> bool {
+        self.comment_polling_enabled
+    }
+
+    pub fn effective_comment_interval_secs(&self) -> u64 {
+        if self.comment_interval_secs == 0 {
+            DEFAULT_COMMENT_POLL_INTERVAL_SECS
+        } else {
+            self.comment_interval_secs
         }
     }
 }
@@ -227,6 +274,11 @@ impl ConfigFile {
 
     pub fn project(&self, name: &str) -> Option<&ProjectConfig> {
         self.projects.iter().find(|p| p.name == name)
+    }
+
+    /// Returns the effective polling config, using defaults if not specified.
+    pub fn effective_polling(&self) -> PollingConfig {
+        self.polling.clone().unwrap_or_default()
     }
 
     pub fn add_project(&self, project: ProjectConfig) -> Result<Self, ConfigError> {

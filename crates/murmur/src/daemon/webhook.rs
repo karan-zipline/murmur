@@ -56,18 +56,16 @@ struct LinearActionAndType {
 pub(in crate::daemon) async fn maybe_start_webhook_server(
     shared: Arc<SharedState>,
     mut shutdown_rx: watch::Receiver<bool>,
+    dedup: Arc<Mutex<DedupStore>>,
 ) -> anyhow::Result<()> {
     let Some(cfg) = load_webhook_config(&shared).await else {
         return Ok(());
     };
 
-    let dedup_path = shared.paths.runtime_dir.join("dedup.json");
-    let dedup_store = DedupStore::load(dedup_path, now_ms()).await?;
-
     let state = WebhookState {
         shared,
         config: cfg.clone(),
-        dedup: Arc::new(Mutex::new(dedup_store)),
+        dedup,
     };
 
     let mut prefix = cfg.path_prefix.trim().to_owned();

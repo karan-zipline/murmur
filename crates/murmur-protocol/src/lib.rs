@@ -27,6 +27,7 @@ pub const MSG_AGENT_DONE: &str = "agent.done";
 pub const MSG_AGENT_IDLE: &str = "agent.idle";
 pub const MSG_AGENT_CLAIM: &str = "agent.claim";
 pub const MSG_AGENT_DESCRIBE: &str = "agent.describe";
+pub const MSG_AGENT_SYNC_COMMENTS: &str = "agent.sync_comments";
 
 pub const MSG_ISSUE_LIST: &str = "issue.list";
 pub const MSG_ISSUE_GET: &str = "issue.get";
@@ -35,6 +36,7 @@ pub const MSG_ISSUE_CREATE: &str = "issue.create";
 pub const MSG_ISSUE_UPDATE: &str = "issue.update";
 pub const MSG_ISSUE_CLOSE: &str = "issue.close";
 pub const MSG_ISSUE_COMMENT: &str = "issue.comment";
+pub const MSG_ISSUE_LIST_COMMENTS: &str = "issue.list_comments";
 pub const MSG_ISSUE_COMMIT: &str = "issue.commit";
 pub const MSG_ISSUE_PLAN: &str = "issue.plan";
 
@@ -365,6 +367,16 @@ pub struct AgentClaimRequest {
 pub struct AgentDescribeRequest {
     pub agent_id: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSyncCommentsRequest {
+    pub agent_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSyncCommentsResponse {
+    pub comments_injected: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -749,6 +761,28 @@ pub struct IssueCommentRequest {
     pub project: String,
     pub id: String,
     pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueListCommentsRequest {
+    pub project: String,
+    pub issue_id: String,
+    #[serde(default)]
+    pub since_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueListCommentsResponse {
+    pub comments: Vec<IssueComment>,
+}
+
+/// A comment on an issue (for protocol use).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueComment {
+    pub id: String,
+    pub author: String,
+    pub body: String,
+    pub created_at_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

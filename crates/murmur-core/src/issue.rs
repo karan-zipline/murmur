@@ -105,6 +105,15 @@ impl ListFilter {
     }
 }
 
+/// Represents a comment on an issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: String,
+    pub author: String,
+    pub body: String,
+    pub created_at_ms: u64,
+}
+
 pub fn compute_ready_issues(open_issues: Vec<Issue>) -> Vec<Issue> {
     let open_ids: BTreeSet<String> = open_issues.iter().map(|i| i.id.clone()).collect();
     open_issues

@@ -70,6 +70,25 @@ See `docs/components/WEBHOOKS.md`.
 
 ---
 
+## Polling Settings
+
+Optional configuration for background polling tasks:
+
+```toml
+[polling]
+comment-polling-enabled = true  # Enable automatic comment polling (default: true)
+comment-interval-secs = 10      # Poll interval in seconds (default: 10)
+```
+
+When enabled, the daemon polls claimed issues for new comments and injects them into the corresponding agent's chat. Comments are deduplicated to prevent duplicate delivery.
+
+You can also manually trigger comment sync for a specific agent:
+```bash
+mm agent sync-comments <agent-id>
+```
+
+---
+
 ## Projects (`[[projects]]`)
 
 Each project stores:

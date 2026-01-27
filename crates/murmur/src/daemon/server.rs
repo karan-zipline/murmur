@@ -8,16 +8,17 @@ use murmur_protocol::{
     AttachRequest, Event, HeartbeatEvent, Request, Response, EVT_HEARTBEAT, MSG_AGENT_ABORT,
     MSG_AGENT_CHAT_HISTORY, MSG_AGENT_CLAIM, MSG_AGENT_CREATE, MSG_AGENT_DELETE,
     MSG_AGENT_DESCRIBE, MSG_AGENT_DONE, MSG_AGENT_IDLE, MSG_AGENT_LIST, MSG_AGENT_SEND_MESSAGE,
-    MSG_ATTACH, MSG_CLAIM_LIST, MSG_COMMIT_LIST, MSG_DETACH, MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT,
-    MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE, MSG_ISSUE_GET, MSG_ISSUE_LIST, MSG_ISSUE_PLAN,
-    MSG_ISSUE_READY, MSG_ISSUE_UPDATE, MSG_MANAGER_CHAT_HISTORY, MSG_MANAGER_CLEAR_HISTORY,
-    MSG_MANAGER_SEND_MESSAGE, MSG_MANAGER_START, MSG_MANAGER_STATUS, MSG_MANAGER_STOP,
-    MSG_ORCHESTRATION_START, MSG_ORCHESTRATION_STATUS, MSG_ORCHESTRATION_STOP, MSG_PERMISSION_LIST,
-    MSG_PERMISSION_REQUEST, MSG_PERMISSION_RESPOND, MSG_PING, MSG_PLAN_CHAT_HISTORY, MSG_PLAN_LIST,
-    MSG_PLAN_SEND_MESSAGE, MSG_PLAN_SHOW, MSG_PLAN_START, MSG_PLAN_STOP, MSG_PROJECT_ADD,
-    MSG_PROJECT_CONFIG_GET, MSG_PROJECT_CONFIG_SET, MSG_PROJECT_CONFIG_SHOW, MSG_PROJECT_LIST,
-    MSG_PROJECT_REMOVE, MSG_PROJECT_STATUS, MSG_QUESTION_LIST, MSG_QUESTION_REQUEST,
-    MSG_QUESTION_RESPOND, MSG_SHUTDOWN, MSG_STATS,
+    MSG_AGENT_SYNC_COMMENTS, MSG_ATTACH, MSG_CLAIM_LIST, MSG_COMMIT_LIST, MSG_DETACH,
+    MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT, MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE, MSG_ISSUE_GET,
+    MSG_ISSUE_LIST, MSG_ISSUE_LIST_COMMENTS, MSG_ISSUE_PLAN, MSG_ISSUE_READY, MSG_ISSUE_UPDATE,
+    MSG_MANAGER_CHAT_HISTORY, MSG_MANAGER_CLEAR_HISTORY, MSG_MANAGER_SEND_MESSAGE,
+    MSG_MANAGER_START, MSG_MANAGER_STATUS, MSG_MANAGER_STOP, MSG_ORCHESTRATION_START,
+    MSG_ORCHESTRATION_STATUS, MSG_ORCHESTRATION_STOP, MSG_PERMISSION_LIST, MSG_PERMISSION_REQUEST,
+    MSG_PERMISSION_RESPOND, MSG_PING, MSG_PLAN_CHAT_HISTORY, MSG_PLAN_LIST, MSG_PLAN_SEND_MESSAGE,
+    MSG_PLAN_SHOW, MSG_PLAN_START, MSG_PLAN_STOP, MSG_PROJECT_ADD, MSG_PROJECT_CONFIG_GET,
+    MSG_PROJECT_CONFIG_SET, MSG_PROJECT_CONFIG_SHOW, MSG_PROJECT_LIST, MSG_PROJECT_REMOVE,
+    MSG_PROJECT_STATUS, MSG_QUESTION_LIST, MSG_QUESTION_REQUEST, MSG_QUESTION_RESPOND,
+    MSG_SHUTDOWN, MSG_STATS,
 };
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{UnixListener, UnixStream};
@@ -199,6 +200,10 @@ async fn handle_connection(
                 let resp = rpc::handle_agent_idle(shared.clone(), req).await;
                 let _ = out_tx.send(Outbound::Response(resp)).await;
             }
+            MSG_AGENT_SYNC_COMMENTS => {
+                let resp = rpc::handle_agent_sync_comments(shared.clone(), req).await;
+                let _ = out_tx.send(Outbound::Response(resp)).await;
+            }
             MSG_ORCHESTRATION_START => {
                 let resp = rpc::handle_orchestration_start(shared.clone(), req).await;
                 let _ = out_tx.send(Outbound::Response(resp)).await;
@@ -321,6 +326,10 @@ async fn handle_connection(
             }
             MSG_ISSUE_COMMENT => {
                 let resp = rpc::handle_issue_comment(&shared, req).await;
+                let _ = out_tx.send(Outbound::Response(resp)).await;
+            }
+            MSG_ISSUE_LIST_COMMENTS => {
+                let resp = rpc::handle_issue_list_comments(&shared, req).await;
                 let _ = out_tx.send(Outbound::Response(resp)).await;
             }
             MSG_ISSUE_PLAN => {

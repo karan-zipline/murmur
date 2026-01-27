@@ -98,6 +98,18 @@ impl<'a> IssueBackendImpl<'a> {
         }
     }
 
+    pub(in crate::daemon) async fn list_comments(
+        &self,
+        issue_id: &str,
+        since_ms: Option<u64>,
+    ) -> anyhow::Result<Vec<murmur_core::issue::Comment>> {
+        match self {
+            IssueBackendImpl::Tk(b) => b.list_comments(issue_id, since_ms).await,
+            IssueBackendImpl::Github(b) => b.list_comments(issue_id, since_ms).await,
+            IssueBackendImpl::Linear(b) => b.list_comments(issue_id, since_ms).await,
+        }
+    }
+
     pub(in crate::daemon) async fn plan(
         &self,
         now_ms: u64,

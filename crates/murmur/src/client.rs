@@ -6,34 +6,36 @@ use murmur_protocol::{
     AgentAbortRequest, AgentChatHistoryRequest, AgentChatHistoryResponse, AgentClaimRequest,
     AgentCreateRequest, AgentCreateResponse, AgentDeleteRequest, AgentDescribeRequest,
     AgentDoneRequest, AgentIdleRequest, AgentListResponse, AgentSendMessageRequest,
-    ClaimListRequest, ClaimListResponse, CommitListRequest, CommitListResponse,
-    IssueCommentRequest, IssueCommitRequest, IssueCreateRequest, IssueCreateResponse,
-    IssueGetRequest, IssueGetResponse, IssueListRequest, IssueListResponse, IssuePlanRequest,
-    IssueReadyRequest, IssueReadyResponse, IssueUpdateRequest, IssueUpdateResponse,
-    ManagerChatHistoryRequest, ManagerChatHistoryResponse, ManagerClearHistoryRequest,
-    ManagerSendMessageRequest, ManagerStartRequest, ManagerStatusRequest, ManagerStatusResponse,
-    ManagerStopRequest, OrchestrationStartRequest, OrchestrationStatusRequest,
-    OrchestrationStatusResponse, OrchestrationStopRequest, PermissionListRequest,
-    PermissionListResponse, PermissionRequestPayload, PermissionRespondPayload, PermissionResponse,
-    PingResponse, PlanChatHistoryRequest, PlanChatHistoryResponse, PlanListRequest,
-    PlanListResponse, PlanSendMessageRequest, PlanShowRequest, PlanShowResponse, PlanStartRequest,
-    PlanStartResponse, PlanStopRequest, ProjectAddRequest, ProjectAddResponse,
-    ProjectConfigGetRequest, ProjectConfigGetResponse, ProjectConfigSetRequest,
-    ProjectConfigShowRequest, ProjectConfigShowResponse, ProjectListResponse, ProjectRemoveRequest,
-    ProjectStatusRequest, ProjectStatusResponse, Request, Response, StatsRequest, StatsResponse,
-    UserQuestionListRequest, UserQuestionListResponse, UserQuestionRequestPayload,
-    UserQuestionRespondPayload, UserQuestionResponse, MSG_AGENT_ABORT, MSG_AGENT_CHAT_HISTORY,
-    MSG_AGENT_CLAIM, MSG_AGENT_CREATE, MSG_AGENT_DELETE, MSG_AGENT_DESCRIBE, MSG_AGENT_DONE,
-    MSG_AGENT_IDLE, MSG_AGENT_LIST, MSG_AGENT_SEND_MESSAGE, MSG_CLAIM_LIST, MSG_COMMIT_LIST,
-    MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT, MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE, MSG_ISSUE_GET,
-    MSG_ISSUE_LIST, MSG_ISSUE_PLAN, MSG_ISSUE_READY, MSG_ISSUE_UPDATE, MSG_MANAGER_CHAT_HISTORY,
-    MSG_MANAGER_CLEAR_HISTORY, MSG_MANAGER_SEND_MESSAGE, MSG_MANAGER_START, MSG_MANAGER_STATUS,
-    MSG_MANAGER_STOP, MSG_ORCHESTRATION_START, MSG_ORCHESTRATION_STATUS, MSG_ORCHESTRATION_STOP,
-    MSG_PERMISSION_LIST, MSG_PERMISSION_REQUEST, MSG_PERMISSION_RESPOND, MSG_PING,
-    MSG_PLAN_CHAT_HISTORY, MSG_PLAN_LIST, MSG_PLAN_SEND_MESSAGE, MSG_PLAN_SHOW, MSG_PLAN_START,
-    MSG_PLAN_STOP, MSG_PROJECT_ADD, MSG_PROJECT_CONFIG_GET, MSG_PROJECT_CONFIG_SET,
-    MSG_PROJECT_CONFIG_SHOW, MSG_PROJECT_LIST, MSG_PROJECT_REMOVE, MSG_PROJECT_STATUS,
-    MSG_QUESTION_LIST, MSG_QUESTION_REQUEST, MSG_QUESTION_RESPOND, MSG_SHUTDOWN, MSG_STATS,
+    AgentSyncCommentsRequest, AgentSyncCommentsResponse, ClaimListRequest, ClaimListResponse,
+    CommitListRequest, CommitListResponse, IssueCommentRequest, IssueCommitRequest,
+    IssueCreateRequest, IssueCreateResponse, IssueGetRequest, IssueGetResponse, IssueListRequest,
+    IssueListResponse, IssuePlanRequest, IssueReadyRequest, IssueReadyResponse, IssueUpdateRequest,
+    IssueUpdateResponse, ManagerChatHistoryRequest, ManagerChatHistoryResponse,
+    ManagerClearHistoryRequest, ManagerSendMessageRequest, ManagerStartRequest,
+    ManagerStatusRequest, ManagerStatusResponse, ManagerStopRequest, OrchestrationStartRequest,
+    OrchestrationStatusRequest, OrchestrationStatusResponse, OrchestrationStopRequest,
+    PermissionListRequest, PermissionListResponse, PermissionRequestPayload,
+    PermissionRespondPayload, PermissionResponse, PingResponse, PlanChatHistoryRequest,
+    PlanChatHistoryResponse, PlanListRequest, PlanListResponse, PlanSendMessageRequest,
+    PlanShowRequest, PlanShowResponse, PlanStartRequest, PlanStartResponse, PlanStopRequest,
+    ProjectAddRequest, ProjectAddResponse, ProjectConfigGetRequest, ProjectConfigGetResponse,
+    ProjectConfigSetRequest, ProjectConfigShowRequest, ProjectConfigShowResponse,
+    ProjectListResponse, ProjectRemoveRequest, ProjectStatusRequest, ProjectStatusResponse,
+    Request, Response, StatsRequest, StatsResponse, UserQuestionListRequest,
+    UserQuestionListResponse, UserQuestionRequestPayload, UserQuestionRespondPayload,
+    UserQuestionResponse, MSG_AGENT_ABORT, MSG_AGENT_CHAT_HISTORY, MSG_AGENT_CLAIM,
+    MSG_AGENT_CREATE, MSG_AGENT_DELETE, MSG_AGENT_DESCRIBE, MSG_AGENT_DONE, MSG_AGENT_IDLE,
+    MSG_AGENT_LIST, MSG_AGENT_SEND_MESSAGE, MSG_AGENT_SYNC_COMMENTS, MSG_CLAIM_LIST,
+    MSG_COMMIT_LIST, MSG_ISSUE_CLOSE, MSG_ISSUE_COMMENT, MSG_ISSUE_COMMIT, MSG_ISSUE_CREATE,
+    MSG_ISSUE_GET, MSG_ISSUE_LIST, MSG_ISSUE_PLAN, MSG_ISSUE_READY, MSG_ISSUE_UPDATE,
+    MSG_MANAGER_CHAT_HISTORY, MSG_MANAGER_CLEAR_HISTORY, MSG_MANAGER_SEND_MESSAGE,
+    MSG_MANAGER_START, MSG_MANAGER_STATUS, MSG_MANAGER_STOP, MSG_ORCHESTRATION_START,
+    MSG_ORCHESTRATION_STATUS, MSG_ORCHESTRATION_STOP, MSG_PERMISSION_LIST, MSG_PERMISSION_REQUEST,
+    MSG_PERMISSION_RESPOND, MSG_PING, MSG_PLAN_CHAT_HISTORY, MSG_PLAN_LIST, MSG_PLAN_SEND_MESSAGE,
+    MSG_PLAN_SHOW, MSG_PLAN_START, MSG_PLAN_STOP, MSG_PROJECT_ADD, MSG_PROJECT_CONFIG_GET,
+    MSG_PROJECT_CONFIG_SET, MSG_PROJECT_CONFIG_SHOW, MSG_PROJECT_LIST, MSG_PROJECT_REMOVE,
+    MSG_PROJECT_STATUS, MSG_QUESTION_LIST, MSG_QUESTION_REQUEST, MSG_QUESTION_RESPOND,
+    MSG_SHUTDOWN, MSG_STATS,
 };
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::UnixStream;
@@ -422,6 +424,25 @@ pub async fn agent_done(
             .error
             .unwrap_or_else(|| "agent.done failed".to_owned())))
     }
+}
+
+pub async fn agent_sync_comments(
+    paths: &MurmurPaths,
+    agent_id: String,
+) -> anyhow::Result<AgentSyncCommentsResponse> {
+    let payload = AgentSyncCommentsRequest { agent_id };
+    let req = Request {
+        r#type: MSG_AGENT_SYNC_COMMENTS.to_owned(),
+        id: new_request_id("agent-sync-comments"),
+        payload: serde_json::to_value(payload).context("serialize payload")?,
+    };
+    let resp = request(paths, req).await?;
+    if !resp.success {
+        return Err(anyhow!(resp
+            .error
+            .unwrap_or_else(|| "agent.sync_comments failed".to_owned())));
+    }
+    serde_json::from_value(resp.payload).context("parse agent.sync_comments payload")
 }
 
 pub async fn orchestration_start(paths: &MurmurPaths, project: String) -> anyhow::Result<()> {

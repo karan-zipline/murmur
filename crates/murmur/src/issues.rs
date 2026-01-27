@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context as _};
 use fs2::FileExt as _;
 use murmur_core::issue::{
-    compute_ready_issues, tk_format_issue, tk_parse_issue, tk_upsert_comment, CreateParams, Issue,
+    compute_ready_issues, tk_format_issue, tk_parse_issue, tk_upsert_comment, Comment, CreateParams, Issue,
     ListFilter, Status, UpdateParams,
 };
 use murmur_core::paths::safe_join;
@@ -207,6 +207,15 @@ impl<'a> TkBackend<'a> {
 
         let _ = lock_file.unlock();
         result
+    }
+
+    /// List comments on an issue. Returns an error as tk backend stores comments in the issue body.
+    pub async fn list_comments(
+        &self,
+        _issue_id: &str,
+        _since_ms: Option<u64>,
+    ) -> anyhow::Result<Vec<Comment>> {
+        Err(anyhow!("list_comments not supported by tk backend"))
     }
 
     async fn commit_unlocked(&self, message: &str) -> anyhow::Result<()> {
