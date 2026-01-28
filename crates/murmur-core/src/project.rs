@@ -55,6 +55,7 @@ mod tests {
             autostart: false,
             linear_team: None,
             linear_project: None,
+            silence_threshold_secs: None,
             extra: BTreeMap::new(),
         }
     }

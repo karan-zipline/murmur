@@ -170,8 +170,8 @@ fn project_add_list_config_and_remove() {
 
     let mut remove = cargo_bin_cmd!("mm");
     remove.env("MURMUR_DIR", murmur_dir.path());
-    remove.args(["project", "remove", "demo"]);
-    remove.assert().success().stdout("ok\n");
+    remove.args(["project", "remove", "demo", "-y"]);
+    remove.assert().success().stdout("Removed project.\n");
 
     let mut list2 = cargo_bin_cmd!("mm");
     list2.env("MURMUR_DIR", murmur_dir.path());
@@ -209,8 +209,8 @@ fn project_add_reuses_existing_repo_dir_after_remove() {
 
     let mut remove = cargo_bin_cmd!("mm");
     remove.env("MURMUR_DIR", murmur_dir.path());
-    remove.args(["project", "remove", "demo"]);
-    remove.assert().success().stdout("ok\n");
+    remove.args(["project", "remove", "demo", "-y"]);
+    remove.assert().success().stdout("Removed project.\n");
 
     assert!(repo_dir.join(".git").exists(), "repo should remain on disk");
 

@@ -909,24 +909,28 @@ pub(in crate::daemon) async fn handle_agent_done(
                 emit_agent_chat_event(shared.as_ref(), &agent_id, &project, msg);
             }
 
-            // Mirror fab behavior: once the PR is created, remove the agent from the system.
-            // The PR contains the work; the agent process and worktree should not linger.
-            let runtime = {
+            // For PR strategy, mark the agent as exited but keep the worktree.
+            // The worktree contains the branch that the PR is based on.
+            {
+                let now_ms = now_ms();
                 let mut agents = shared.agents.lock().await;
-                let Some(rt) = agents.agents.remove(&agent_id) else {
-                    return error_response(req, "agent not found");
-                };
-                rt
-            };
-
-            if let Err(err) = cleanup_agent_runtime(shared.clone(), runtime).await {
-                return error_response(req, &format!("cleanup agent failed: {err:#}"));
+                if let Some(rt) = agents.agents.get_mut(&agent_id) {
+                    // Stop the agent tasks
+                    let _ = rt.abort_tx.send(true);
+                    // Mark as exited
+                    rt.record = rt.record.apply_event(AgentEvent::Exited { code: Some(0) }, now_ms);
+                }
             }
 
             mark_issue_completed(&shared, &project, &issue_id).await;
             release_claims_for_agent(&shared, &agent_id).await;
             persist_agents_runtime(shared.clone()).await;
-            emit_agent_deleted_event(shared.as_ref(), &agent_id, &project);
+            emit_agent_state_changed_event(
+                shared.as_ref(),
+                &agent_id,
+                &project,
+                AgentState::Exited,
+            );
 
             Response {
                 r#type: MSG_AGENT_DONE.to_owned(),

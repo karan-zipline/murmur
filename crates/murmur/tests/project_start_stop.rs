@@ -109,10 +109,10 @@ fn shutdown_daemon(dir: &TempDir, mut child: std::process::Child) {
     }
 }
 
-fn orchestration_status_contains(dir: &TempDir, project: &str, expected_running: bool) {
+fn project_status_contains(dir: &TempDir, project: &str, expected_running: bool) {
     let mut status = cargo_bin_cmd!("mm");
     status.env("MURMUR_DIR", dir.path());
-    status.args(["orchestration", "status", project]);
+    status.args(["project", "status", project]);
     status
         .assert()
         .success()
@@ -141,7 +141,7 @@ fn project_start_stop_all_controls_orchestration() {
         ]);
         add.assert().success().stdout("ok\n");
 
-        orchestration_status_contains(&murmur_dir, name, false);
+        project_status_contains(&murmur_dir, name, false);
     }
 
     let mut start = cargo_bin_cmd!("mm");
@@ -150,7 +150,7 @@ fn project_start_stop_all_controls_orchestration() {
     start.assert().success().stdout("ok\n");
 
     for name in ["demo-a", "demo-b"] {
-        orchestration_status_contains(&murmur_dir, name, true);
+        project_status_contains(&murmur_dir, name, true);
     }
 
     let mut stop = cargo_bin_cmd!("mm");
@@ -159,7 +159,7 @@ fn project_start_stop_all_controls_orchestration() {
     stop.assert().success().stdout("ok\n");
 
     for name in ["demo-a", "demo-b"] {
-        orchestration_status_contains(&murmur_dir, name, false);
+        project_status_contains(&murmur_dir, name, false);
     }
 
     shutdown_daemon(&murmur_dir, daemon);

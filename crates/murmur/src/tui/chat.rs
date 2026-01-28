@@ -89,18 +89,32 @@ pub fn merge_history(history: &[ChatMessage], existing: &[ChatMessage]) -> Vec<C
 }
 
 fn is_duplicate_message(existing: &ChatMessage, incoming: &ChatMessage) -> bool {
-    if existing.role != incoming.role {
-        return false;
+    // For tool messages, require matching roles and use special comparison
+    if existing.role == ChatRole::Tool || incoming.role == ChatRole::Tool {
+        if existing.role != incoming.role {
+            return false;
+        }
+        if existing.tool_use_id.is_some() || incoming.tool_use_id.is_some() {
+            return existing.tool_use_id == incoming.tool_use_id
+                && existing.tool_name == incoming.tool_name
+                && existing.tool_result == incoming.tool_result
+                && existing.tool_input == incoming.tool_input
+                && existing.is_error == incoming.is_error;
+        }
     }
 
-    if existing.role == ChatRole::Tool
-        && (existing.tool_use_id.is_some() || incoming.tool_use_id.is_some())
-    {
-        return existing.tool_use_id == incoming.tool_use_id
-            && existing.tool_name == incoming.tool_name
-            && existing.tool_result == incoming.tool_result
-            && existing.tool_input == incoming.tool_input
-            && existing.is_error == incoming.is_error;
+    // Allow cross-role deduplication for assistant/system pairs
+    // (Claude Code sometimes sends both "assistant" and "result" events with same content)
+    if existing.role != incoming.role {
+        let is_assistant_system_pair = (existing.role == ChatRole::Assistant
+            && incoming.role == ChatRole::System)
+            || (existing.role == ChatRole::System && incoming.role == ChatRole::Assistant);
+
+        if !is_assistant_system_pair {
+            return false;
+        }
+        // For cross-role, require exact content match
+        return existing.content == incoming.content;
     }
 
     if existing.content != incoming.content {
@@ -775,5 +789,60 @@ mod tests {
             .join("\n");
         assert!(rendered.contains("[Read]"));
         assert!(rendered.contains("Read 2 lines"));
+    }
+
+    #[test]
+    fn deduplicates_assistant_and_system_with_same_content() {
+        let assistant = ChatMessage {
+            role: ChatRole::Assistant,
+            content: "Hello, world!".to_owned(),
+            tool_name: None,
+            tool_input: None,
+            tool_use_id: None,
+            tool_result: None,
+            is_error: false,
+            ts_ms: 1,
+        };
+        let system = ChatMessage {
+            role: ChatRole::System,
+            content: "Hello, world!".to_owned(),
+            tool_name: None,
+            tool_input: None,
+            tool_use_id: None,
+            tool_result: None,
+            is_error: false,
+            ts_ms: 2,
+        };
+
+        // System after Assistant with same content should be a duplicate
+        assert!(is_duplicate_message(&assistant, &system));
+        // Assistant after System with same content should also be a duplicate
+        assert!(is_duplicate_message(&system, &assistant));
+
+        // Different content should not be a duplicate
+        let different_system = ChatMessage {
+            role: ChatRole::System,
+            content: "Different content".to_owned(),
+            tool_name: None,
+            tool_input: None,
+            tool_use_id: None,
+            tool_result: None,
+            is_error: false,
+            ts_ms: 2,
+        };
+        assert!(!is_duplicate_message(&assistant, &different_system));
+
+        // User vs System should never be a duplicate even with same content
+        let user = ChatMessage {
+            role: ChatRole::User,
+            content: "Hello, world!".to_owned(),
+            tool_name: None,
+            tool_input: None,
+            tool_use_id: None,
+            tool_result: None,
+            is_error: false,
+            ts_ms: 1,
+        };
+        assert!(!is_duplicate_message(&user, &system));
     }
 }

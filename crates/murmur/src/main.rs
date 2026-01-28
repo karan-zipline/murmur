@@ -20,15 +20,27 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "mm",
     version,
-    about = "Murmur — local-only agent orchestration supervisor"
+    about = "Murmur — local-only agent orchestration supervisor",
+    long_about = "Murmur supervises multiple AI coding agents across projects.\n\n\
+        It provides automatic task orchestration, git worktree isolation,\n\
+        and a terminal UI for monitoring agent activity.\n\n\
+        Quick Start:\n  \
+        mm server start              Start the daemon\n  \
+        mm project add <url>         Register a project\n  \
+        mm project start <name>      Begin orchestration\n  \
+        mm tui                       Open the terminal UI",
+    after_help = "Use 'mm <command> --help' for more information about a command."
 )]
 struct Cli {
+    /// Override the Murmur data directory
     #[arg(long, global = true, value_name = "DIR", env = "MURMUR_DIR")]
     murmur_dir: Option<PathBuf>,
 
+    /// Override the daemon socket path
     #[arg(long, global = true, value_name = "PATH", env = "MURMUR_SOCKET_PATH")]
     socket_path: Option<PathBuf>,
 
+    /// Set log level [possible values: error, warn, info, debug, trace]
     #[arg(long, global = true, env = "MURMUR_LOG", value_name = "LEVEL")]
     log_level: Option<String>,
 
@@ -38,92 +50,153 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    #[command(hide = true)]
-    Ping,
-    #[command(hide = true)]
-    Stats {
-        #[arg(long)]
-        project: Option<String>,
-    },
+    // === Core Commands ===
+    /// Show daemon and project status
+    #[command(
+        long_about = "Show the status of the Murmur daemon and all registered projects.\n\n\
+            Use -a/--agents to also display running agents.\n\n\
+            Examples:\n  \
+            mm status\n  \
+            mm status -a"
+    )]
     Status {
+        /// Show running agents
         #[arg(short = 'a', long)]
         agents: bool,
     },
-    Version,
-    Completion {
-        #[command(subcommand)]
-        command: CompletionCommand,
-    },
+
+    /// Open the terminal user interface
+    #[command(
+        long_about = "Launch the interactive terminal UI for monitoring and controlling agents.\n\n\
+            The TUI provides real-time views of agents, permissions, and chat history.\n\
+            Press '?' for keybindings help."
+    )]
+    Tui,
+
+    /// Stream live events from the daemon
+    #[command(
+        long_about = "Attach to the daemon and stream events in real-time.\n\n\
+            Filter by project names or omit to see all events.\n\
+            Press Ctrl-C to detach.\n\n\
+            Examples:\n  \
+            mm attach              # All projects\n  \
+            mm attach myproject    # Single project\n  \
+            mm attach proj1 proj2  # Multiple projects"
+    )]
     Attach {
+        /// Filter events to specific projects
         projects: Vec<String>,
     },
-    Tui,
+
+    // === Server Management ===
+    /// Manage the daemon server
     Server {
         #[command(subcommand)]
         command: ServerCommand,
     },
+
+    // === Project Management ===
+    /// Manage projects
     Project {
         #[command(subcommand)]
         command: ProjectCommand,
     },
+
+    // === Agent Operations ===
+    /// Manage coding agents
     Agent {
         #[command(subcommand)]
         command: AgentCommand,
     },
-    #[command(
-        about = "Commands for managing issues using the configured backend (tk, github, etc.)."
-    )]
+
+    /// Manage per-project manager agents
+    Manager {
+        #[command(subcommand)]
+        command: ManagerCommand,
+    },
+
+    /// Manage the global director agent
+    Director {
+        #[command(subcommand)]
+        command: DirectorCommand,
+    },
+
+    // === Issue Tracking ===
+    /// Manage issues (tk, github, linear backends)
     Issue(IssueArgs),
-    #[command(hide = true)]
-    Orchestration {
+
+    // === Planning ===
+    /// Manage plans and planners
+    Plan {
         #[command(subcommand)]
-        command: OrchestrationCommand,
+        command: PlanCommand,
     },
-    #[command(hide = true)]
-    Claim {
-        #[command(subcommand)]
-        command: ClaimCommand,
-    },
+
+    // === Utilities ===
+    /// List active issue claims
+    #[command(
+        long_about = "Show all issues currently claimed by agents.\n\n\
+            Claims prevent multiple agents from working on the same issue.\n\n\
+            Examples:\n  \
+            mm claims\n  \
+            mm claims --project myproject"
+    )]
     Claims {
-        #[arg(long)]
+        /// Filter by project
+        #[arg(short = 'p', long)]
         project: Option<String>,
     },
+
+    /// Clean up merged branches
     Branch {
         #[command(subcommand)]
         command: BranchCommand,
     },
-    #[command(hide = true)]
+
+    /// Show usage statistics
+    Stats {
+        /// Filter by project
+        #[arg(short = 'p', long)]
+        project: Option<String>,
+    },
+
+    /// View merge commit history
     Commit {
         #[command(subcommand)]
         command: CommitCommand,
     },
+
+    /// Print version information
+    Version,
+
+    /// Generate shell completions
+    Completion {
+        #[command(subcommand)]
+        command: CompletionCommand,
+    },
+
+    // === Hidden Internal Commands ===
+    #[command(hide = true)]
+    Ping,
+
     #[command(hide = true)]
     Hook {
         #[command(subcommand)]
         command: HookCommand,
     },
-    Plan {
-        #[command(subcommand)]
-        command: PlanCommand,
-    },
-    Manager {
-        #[command(subcommand)]
-        command: ManagerCommand,
-    },
-    Director {
-        #[command(subcommand)]
-        command: DirectorCommand,
-    },
+
     #[command(hide = true)]
     Permission {
         #[command(subcommand)]
         command: PermissionCommand,
     },
+
     #[command(hide = true)]
     Question {
         #[command(subcommand)]
         command: QuestionCommand,
     },
+
     #[command(hide = true, name = "__internal")]
     Internal {
         #[command(subcommand)]
@@ -133,63 +206,142 @@ enum Command {
 
 #[derive(Subcommand, Debug)]
 enum CompletionCommand {
+    /// Generate bash completions
     Bash,
+    /// Generate fish completions
     Fish,
+    /// Generate PowerShell completions
     Powershell,
+    /// Generate zsh completions
     Zsh,
 }
 
 #[derive(Subcommand, Debug)]
 enum ServerCommand {
+    /// Start the daemon
+    #[command(
+        long_about = "Start the Murmur daemon process.\n\n\
+            The daemon runs in the background by default.\n\
+            Use -f/--foreground for development/debugging.\n\n\
+            Examples:\n  \
+            mm server start\n  \
+            mm server start -f"
+    )]
     Start {
+        /// Run in foreground (don't daemonize)
         #[arg(short = 'f', long)]
         foreground: bool,
     },
+
+    /// Check if daemon is running
     Status,
+
+    /// Stop the daemon
     #[command(alias = "shutdown")]
     Stop,
+
+    /// Restart the daemon
     Restart {
-        #[arg(long)]
+        /// Run in foreground after restart
+        #[arg(short = 'f', long)]
         foreground: bool,
     },
 }
 
 #[derive(Subcommand, Debug)]
 enum ProjectCommand {
+    /// Register a new project
+    #[command(
+        alias = "new",
+        long_about = "Register a project from a Git URL or local path.\n\n\
+            The project will be cloned to ~/.murmur/projects/<name>/repo.\n\
+            The name is inferred from the URL if not specified.\n\n\
+            Examples:\n  \
+            mm project add https://github.com/org/repo.git\n  \
+            mm project add git@github.com:org/repo.git -n myproj\n  \
+            mm project add /path/to/local/repo -m 5\n  \
+            mm project add <url> --autostart -b codex"
+    )]
     Add {
+        /// Git URL or local path
         input: String,
-        #[arg(long)]
+        /// Project name (inferred from URL if omitted)
+        #[arg(short = 'n', long)]
         name: Option<String>,
+        /// Override remote URL
         #[arg(long)]
         remote_url: Option<String>,
-        #[arg(long)]
+        /// Maximum concurrent agents (default: 3)
+        #[arg(short = 'm', long)]
         max_agents: Option<u16>,
+        /// Start orchestration when daemon starts
         #[arg(long)]
         autostart: bool,
-        #[arg(long)]
+        /// AI backend [possible values: claude, codex]
+        #[arg(short = 'b', long, value_name = "BACKEND")]
         backend: Option<String>,
     },
+
+    /// List registered projects
+    #[command(alias = "ls")]
     List,
+
+    /// Remove a project
+    #[command(alias = "rm")]
     Remove {
+        /// Project name
         name: String,
+        /// Also delete all agent worktrees
         #[arg(long)]
         delete_worktrees: bool,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
+
+    /// Start orchestration for a project
+    #[command(
+        long_about = "Start automatic agent orchestration for a project.\n\n\
+            When orchestration is running, agents are automatically spawned\n\
+            to work on open issues.\n\n\
+            Examples:\n  \
+            mm project start myproject\n  \
+            mm project start -a"
+    )]
     Start {
+        /// Project name
         project: Option<String>,
+        /// Start all projects
         #[arg(short = 'a', long)]
         all: bool,
     },
+
+    /// Stop orchestration for a project
+    #[command(
+        long_about = "Stop automatic agent orchestration for a project.\n\n\
+            Running agents continue unless --abort-agents is specified.\n\n\
+            Examples:\n  \
+            mm project stop myproject\n  \
+            mm project stop -a --abort-agents"
+    )]
     Stop {
+        /// Project name
         project: Option<String>,
+        /// Stop all projects
         #[arg(short = 'a', long)]
         all: bool,
+        /// Also abort all running agents
         #[arg(long, alias = "stop-agents")]
         abort_agents: bool,
     },
+
+    /// Show project status
     Status {
+        /// Project name
         name: String,
     },
+
+    /// View or modify project configuration
     Config {
         #[command(subcommand)]
         command: ProjectConfigCommand,
@@ -234,96 +386,160 @@ EXAMPLES:
 
 #[derive(Subcommand, Debug)]
 enum AgentCommand {
+    /// List running agents
+    #[command(
+        alias = "ls",
+        long_about = "List all running agents across projects.\n\n\
+            Examples:\n  \
+            mm agent list\n  \
+            mm agent list -p myproject"
+    )]
+    List {
+        /// Filter by project
+        #[arg(short = 'p', long)]
+        project: Option<String>,
+    },
+
+    /// Abort a running agent
+    #[command(
+        alias = "kill",
+        long_about = "Abort a running agent.\n\n\
+            By default this requests a graceful shutdown.\n\
+            Use -f/--force to kill immediately (SIGKILL).\n\n\
+            Examples:\n  \
+            mm agent abort a-1\n  \
+            mm agent abort a-1 -f -y"
+    )]
+    Abort {
+        /// Agent ID
+        agent_id: String,
+        /// Force kill immediately (SIGKILL)
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Start a planning agent
+    Plan(AgentPlanArgs),
+
+    /// Fetch and inject new comments for an agent
+    #[command(
+        long_about = "Manually trigger comment sync for a specific agent.\n\n\
+            This fetches any new comments on the agent's claimed issue\n\
+            and delivers them to the agent."
+    )]
+    SyncComments {
+        /// Agent ID
+        agent_id: String,
+    },
+
+    // === Agent-callable commands (use MURMUR_AGENT_ID) ===
+    /// Claim a ticket for this agent
+    #[command(
+        hide = true,
+        long_about = "Claim a ticket to prevent other agents from working on it.\n\n\
+            Uses MURMUR_AGENT_ID from the environment."
+    )]
+    Claim {
+        /// Issue ID to claim
+        issue_id: String,
+    },
+
+    /// Set a description for this agent
+    #[command(
+        hide = true,
+        long_about = "Set a human-readable description of what the agent is currently doing.\n\n\
+            Uses MURMUR_AGENT_ID from the environment."
+    )]
+    Describe {
+        /// Description text
+        description: String,
+    },
+
+    /// Signal task completion
+    #[command(
+        hide = true,
+        long_about = "Called by agents to signal task completion.\n\n\
+            Uses MURMUR_AGENT_ID from the environment."
+    )]
+    Done {
+        /// Task/issue ID
+        #[arg(long)]
+        task: Option<String>,
+        /// Error message if failed
+        #[arg(long)]
+        error: Option<String>,
+    },
+
     #[command(hide = true)]
     Create {
         project: String,
         issue_id: String,
-        #[arg(long)]
+        #[arg(long, value_name = "BACKEND")]
         backend: Option<String>,
     },
-    List {
-        #[arg(long)]
-        project: Option<String>,
-    },
+
     #[command(hide = true)]
     Delete {
         agent_id: String,
     },
-    #[command(
-        about = "Abort a running agent",
-        long_about = "Abort a running agent.\n\nBy default this requests a graceful shutdown.\nUse --force to kill immediately."
-    )]
-    Abort {
-        agent_id: String,
-        #[arg(short = 'f', long)]
-        force: bool,
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    Plan(AgentPlanArgs),
-    #[command(
-        about = "Claim a ticket for this agent",
-        long_about = "Claim a ticket to prevent other agents from working on it.\n\nUses MURMUR_AGENT_ID from the environment."
-    )]
-    Claim {
-        issue_id: String,
-    },
-    #[command(
-        about = "Set a description for this agent",
-        long_about = "Set a human-readable description of what the agent is currently doing.\n\nUses MURMUR_AGENT_ID from the environment."
-    )]
-    Describe {
-        description: String,
-    },
+
     #[command(hide = true)]
     SendMessage {
         agent_id: String,
         message: String,
     },
+
     #[command(hide = true)]
     Tail {
         agent_id: String,
     },
+
     #[command(hide = true)]
     ChatHistory {
         agent_id: String,
         #[arg(long)]
         limit: Option<u32>,
     },
-    #[command(
-        about = "Signal that the agent has completed its task",
-        long_about = "Called by agents to signal task completion.\n\nUses MURMUR_AGENT_ID from the environment."
-    )]
-    Done {
-        #[arg(long)]
-        task: Option<String>,
-        #[arg(long)]
-        error: Option<String>,
-    },
-    #[command(
-        about = "Fetch and inject new comments for an agent",
-        long_about = "Manually trigger comment sync for a specific agent.\n\nThis fetches any new comments on the agent's claimed issue and delivers them to the agent."
-    )]
-    SyncComments { agent_id: String },
 }
 
 #[derive(Args, Debug)]
-#[command(args_conflicts_with_subcommands = true)]
+#[command(
+    args_conflicts_with_subcommands = true,
+    about = "Start a planning agent",
+    long_about = "Start a planning agent to create implementation plans.\n\n\
+        The planner explores the codebase and designs an approach.\n\
+        Plans are saved to ~/.murmur/plans/.\n\n\
+        Examples:\n  \
+        mm agent plan \"Add user authentication\"\n  \
+        mm agent plan -p myproject \"Refactor API\"\n  \
+        mm agent plan list"
+)]
 struct AgentPlanArgs {
-    #[arg(long, global = true)]
+    /// Project (optional, uses ~/.murmur/planners/ if omitted)
+    #[arg(short = 'p', long, global = true)]
     project: Option<String>,
 
     #[command(subcommand)]
     command: Option<AgentPlanSubcommand>,
 
+    /// Planning prompt
     #[arg(value_name = "PROMPT", trailing_var_arg = true)]
     prompt: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum AgentPlanSubcommand {
+    /// List running planners
+    #[command(alias = "ls")]
     List,
-    Stop { plan_id: String },
+    /// Stop a running planner
+    Stop {
+        /// Plan ID
+        plan_id: String,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -343,46 +559,61 @@ struct IssueArgs {
 
 #[derive(Subcommand, Debug)]
 enum IssueCommand {
-    #[command(about = "List issues with optional filters.")]
+    /// List issues
+    #[command(
+        alias = "ls",
+        long_about = "List issues from the configured backend.\n\n\
+            Examples:\n  \
+            mm issue list\n  \
+            mm issue list -s open"
+    )]
     List {
-        #[arg(short = 's', long, help = "Filter by status (open, closed, blocked)")]
+        /// Filter by status [possible values: open, closed, blocked]
+        #[arg(short = 's', long, value_name = "STATUS")]
         status: Option<String>,
     },
-    #[command(about = "Show detailed information about an issue.")]
-    Show { id: String },
-    #[command(hide = true)]
-    Get { id: String },
-    #[command(about = "List open issues with no open dependencies.")]
+
+    /// Show issue details
+    Show {
+        /// Issue ID
+        id: String,
+    },
+
+    /// List issues ready to work on
+    #[command(long_about = "List open issues with no unresolved dependencies.\n\n\
+        These are issues that agents can immediately start working on.")]
     Ready,
-    #[command(about = "Create a new issue. Use 'mm issue commit' to push changes.")]
+
+    /// Create a new issue
+    #[command(
+        alias = "new",
+        long_about = "Create a new issue in the configured backend.\n\n\
+            For tk backend, use 'mm issue commit' to push changes.\n\n\
+            Examples:\n  \
+            mm issue create \"Fix login bug\"\n  \
+            mm issue create \"Add feature\" -d \"Description here\"\n  \
+            mm issue create \"Bug fix\" --type bug --priority 2"
+    )]
     Create {
+        /// Issue title
         title: String,
-        #[arg(short = 'd', long, help = "Issue description")]
+        /// Issue description
+        #[arg(short = 'd', long)]
         description: Option<String>,
-        #[arg(
-            long = "type",
-            value_name = "string",
-            default_value = "task",
-            help = "Issue type (task, bug, feature, chore)"
-        )]
+        /// Issue type [possible values: task, bug, feature, chore]
+        #[arg(long = "type", value_name = "TYPE", default_value = "task")]
         issue_type: String,
-        #[arg(
-            long,
-            default_value_t = 1,
-            help = "Issue priority (0=low, 1=medium, 2=high)"
-        )]
+        /// Priority [possible values: 0=low, 1=medium, 2=high]
+        #[arg(long, default_value_t = 1)]
         priority: i32,
-        #[arg(long, help = "Commit and push changes immediately")]
+        /// Commit and push immediately (tk only)
+        #[arg(long)]
         commit: bool,
-        #[arg(
-            long,
-            value_name = "strings",
-            value_delimiter = ',',
-            alias = "dep",
-            help = "Issue IDs this issue depends on (comma-separated)"
-        )]
+        /// Dependencies (comma-separated issue IDs)
+        #[arg(long, value_name = "IDS", value_delimiter = ',', alias = "dep")]
         depends_on: Vec<String>,
-        #[arg(long, help = "Parent issue ID (creates a sub-issue)")]
+        /// Parent issue ID (creates a sub-issue)
+        #[arg(long)]
         parent: Option<String>,
 
         #[arg(hide = true, long, value_name = "LABEL")]
@@ -390,16 +621,26 @@ enum IssueCommand {
         #[arg(hide = true, long, value_name = "LINK")]
         link: Vec<String>,
     },
+
+    /// Update an issue
     #[command(
-        about = "Update an issue's status, priority, or other fields. Use 'mm issue commit' to push changes."
+        long_about = "Update an issue's status, priority, or other fields.\n\n\
+            For tk backend, use 'mm issue commit' to push changes.\n\n\
+            Examples:\n  \
+            mm issue update 42 -s closed\n  \
+            mm issue update 42 -t \"New title\" --priority 2"
     )]
     Update {
+        /// Issue ID
         id: String,
-        #[arg(short = 't', long, help = "New title")]
+        /// New title
+        #[arg(short = 't', long)]
         title: Option<String>,
-        #[arg(short = 's', long, help = "New status (open, closed, blocked)")]
+        /// New status [possible values: open, closed, blocked]
+        #[arg(short = 's', long, value_name = "STATUS")]
         status: Option<String>,
-        #[arg(long, help = "New priority (0=low, 1=medium, 2=high)")]
+        /// New priority [possible values: 0=low, 1=medium, 2=high]
+        #[arg(long)]
         priority: Option<i32>,
 
         #[arg(hide = true, long)]
@@ -422,64 +663,66 @@ enum IssueCommand {
         #[arg(hide = true, long)]
         clear_links: bool,
     },
-    #[command(about = "Mark an issue as closed. Use 'mm issue commit' to push changes.")]
-    Close { id: String },
-    #[command(
-        about = "Add a comment to an issue. The comment body can be provided via --body flag."
-    )]
-    Comment {
+
+    /// Close an issue
+    Close {
+        /// Issue ID
         id: String,
-        #[arg(short = 'b', long, help = "Comment body")]
+    },
+
+    /// Add a comment to an issue
+    #[command(long_about = "Add a comment to an issue.\n\n\
+        The body can be provided via -b/--body or read from stdin.\n\n\
+        Examples:\n  \
+        mm issue comment 42 -b \"Comment text\"\n  \
+        echo \"Comment\" | mm issue comment 42")]
+    Comment {
+        /// Issue ID
+        id: String,
+        /// Comment body
+        #[arg(short = 'b', long)]
         body: Option<String>,
     },
-    #[command(
-        about = "Update or create a ## Plan section in the issue body. The plan content can be provided via --body or --file flag."
-    )]
+
+    /// Update the plan section of an issue
+    #[command(long_about = "Update or create a ## Plan section in the issue body.\n\n\
+        The plan can be provided via -b/--body or -f/--file.\n\n\
+        Examples:\n  \
+        mm issue plan 42 -b \"Step 1: ...\"\n  \
+        mm issue plan 42 -f plan.md")]
     Plan {
+        /// Issue ID
         id: String,
-        #[arg(short = 'b', long, help = "Plan content")]
+        /// Plan content
+        #[arg(short = 'b', long)]
         body: Option<String>,
-        #[arg(short = 'f', long, help = "Read plan content from file")]
+        /// Read plan from file
+        #[arg(short = 'f', long, value_name = "FILE")]
         file: Option<PathBuf>,
     },
-    #[command(
-        about = "Stage, commit, and push any pending issue changes to the remote repository."
-    )]
+
+    /// Commit and push issue changes (tk only)
     Commit,
-}
 
-#[derive(Subcommand, Debug)]
-enum OrchestrationCommand {
-    Start {
-        project: Option<String>,
-        #[arg(long)]
-        all: bool,
-    },
-    Stop {
-        project: Option<String>,
-        #[arg(long)]
-        all: bool,
-        #[arg(long, alias = "stop-agents")]
-        abort_agents: bool,
-    },
-    Status {
-        project: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum ClaimCommand {
-    List {
-        #[arg(long)]
-        project: Option<String>,
-    },
+    #[command(hide = true)]
+    Get { id: String },
 }
 
 #[derive(Subcommand, Debug)]
 enum BranchCommand {
+    /// Delete merged murmur/* branches
+    #[command(long_about = "Clean up merged murmur/* branches from the remote.\n\n\
+        Use --dry-run to preview what would be deleted.\n\
+        Use --local to also delete local branches.\n\n\
+        Examples:\n  \
+        mm branch cleanup --dry-run\n  \
+        mm branch cleanup\n  \
+        mm branch cleanup --local")]
     Cleanup {
+        /// Preview changes without deleting
         #[arg(long)]
         dry_run: bool,
+        /// Also delete local branches
         #[arg(long)]
         local: bool,
     },
@@ -487,10 +730,14 @@ enum BranchCommand {
 
 #[derive(Subcommand, Debug)]
 enum CommitCommand {
+    /// List recent merge commits
+    #[command(alias = "ls")]
     List {
-        #[arg(long)]
+        /// Filter by project
+        #[arg(short = 'p', long)]
         project: Option<String>,
-        #[arg(long)]
+        /// Maximum number of commits to show
+        #[arg(short = 'n', long)]
         limit: Option<u32>,
     },
 }
@@ -507,35 +754,46 @@ enum HookCommand {
 
 #[derive(Subcommand, Debug)]
 enum PlanCommand {
+    /// List stored plan files
+    #[command(alias = "ls", alias = "list-stored")]
+    List,
+
+    /// Show contents of a stored plan
+    #[command(alias = "show")]
+    Read {
+        /// Plan ID
+        plan_id: String,
+    },
+
+    /// Write plan content from stdin (used by planners)
+    #[command(hide = true)]
+    Write,
+
     #[command(hide = true)]
     Start {
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         project: Option<String>,
         #[arg(required = true, trailing_var_arg = true)]
         prompt: Vec<String>,
     },
+
     #[command(hide = true)]
     Stop {
         plan_id: String,
     },
-    #[command(name = "list-running")]
-    #[command(hide = true)]
+
+    #[command(hide = true, name = "list-running")]
     ListRunning {
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         project: Option<String>,
     },
-    #[command(alias = "list-stored")]
-    List,
-    Write,
-    #[command(alias = "show")]
-    Read {
-        plan_id: String,
-    },
+
     #[command(hide = true)]
     SendMessage {
         plan_id: String,
         message: String,
     },
+
     #[command(hide = true)]
     ChatHistory {
         plan_id: String,
@@ -546,54 +804,92 @@ enum PlanCommand {
 
 #[derive(Subcommand, Debug)]
 enum ManagerCommand {
+    /// Start the manager agent for a project
+    #[command(long_about = "Start the per-project manager agent.\n\n\
+        The manager agent can explore the codebase, create issues,\n\
+        and coordinate work. It does not implement code changes.\n\n\
+        Examples:\n  \
+        mm manager start myproject")]
     Start {
+        /// Project name
         project: String,
     },
+
+    /// Stop the manager agent
     Stop {
+        /// Project name
         project: String,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
+
+    /// Show manager status
     Status {
+        /// Project name
         project: String,
     },
+
+    /// Clear manager chat history
+    #[command(name = "clear", alias = "clear-history")]
+    ClearHistory {
+        /// Project name
+        project: String,
+    },
+
     #[command(hide = true)]
     SendMessage {
         project: String,
         message: String,
     },
+
     #[command(hide = true)]
     ChatHistory {
         project: String,
         #[arg(long)]
         limit: Option<u32>,
-    },
-    #[command(name = "clear", alias = "clear-history")]
-    ClearHistory {
-        project: String,
     },
 }
 
 #[derive(Subcommand, Debug)]
 enum DirectorCommand {
     /// Start the director agent
+    #[command(long_about = "Start the global director agent.\n\n\
+        The director provides CTO-level coordination across all projects.\n\
+        There is only one director for the entire Murmur instance.\n\n\
+        Examples:\n  \
+        mm director start\n  \
+        mm director start -b codex")]
     Start {
-        #[arg(long)]
+        /// AI backend [possible values: claude, codex]
+        #[arg(short = 'b', long, value_name = "BACKEND")]
         backend: Option<String>,
     },
+
     /// Stop the director agent
-    Stop,
+    Stop {
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
     /// Show director status
     Status,
+
+    /// Clear director chat history
+    #[command(name = "clear", alias = "clear-history")]
+    ClearHistory,
+
     #[command(hide = true)]
     SendMessage {
         message: String,
     },
+
     #[command(hide = true)]
     ChatHistory {
         #[arg(long)]
         limit: Option<u32>,
     },
-    #[command(name = "clear", alias = "clear-history")]
-    ClearHistory,
 }
 
 #[derive(Subcommand, Debug)]
@@ -740,14 +1036,17 @@ async fn dispatch(command: Command, paths: &MurmurPaths) -> anyhow::Result<()> {
         Command::Project { command } => dispatch_project(command, paths).await,
         Command::Agent { command } => dispatch_agent(command, paths).await,
         Command::Issue(args) => dispatch_issue(args, paths).await,
-        Command::Orchestration { command } => dispatch_orchestration(command, paths).await,
-        Command::Claim { command } => dispatch_claim(command, paths).await,
         Command::Claims { project } => {
-            let resp = client::claim_list(paths, project).await?;
+            let resp = client::claim_list(paths, project.clone()).await?;
             if resp.claims.is_empty() {
-                println!("No active claims");
+                println!("No active claims.");
+                if project.is_none() {
+                    println!();
+                    println!("Claims are created when agents start working on issues.");
+                }
                 return Ok(());
             }
+            println!("ISSUE\tAGENT\tPROJECT");
             for c in resp.claims {
                 println!("{}\t{}\t{}", c.issue_id, c.agent_id, c.project);
             }
@@ -848,7 +1147,7 @@ async fn dispatch_manager(command: ManagerCommand, paths: &MurmurPaths) -> anyho
             println!("ok");
             Ok(())
         }
-        ManagerCommand::Stop { project } => {
+        ManagerCommand::Stop { project, yes: _ } => {
             client::manager_stop(paths, project).await?;
             println!("ok");
             Ok(())
@@ -899,7 +1198,7 @@ async fn dispatch_director(command: DirectorCommand, paths: &MurmurPaths) -> any
             println!("{}", resp.id);
             Ok(())
         }
-        DirectorCommand::Stop => {
+        DirectorCommand::Stop { yes: _ } => {
             client::director_stop(paths).await?;
             println!("ok");
             Ok(())
@@ -1119,6 +1418,14 @@ async fn dispatch_project(command: ProjectCommand, paths: &MurmurPaths) -> anyho
         }
         ProjectCommand::List => {
             let resp = client::project_list(paths).await?;
+            if resp.projects.is_empty() {
+                println!("No projects registered.");
+                println!();
+                println!("Add a project with:");
+                println!("  mm project add <git-url-or-path>");
+                return Ok(());
+            }
+            println!("NAME\tREMOTE");
             for p in resp.projects {
                 println!("{}\t{}", p.name, p.remote_url);
             }
@@ -1212,9 +1519,21 @@ async fn dispatch_project(command: ProjectCommand, paths: &MurmurPaths) -> anyho
         ProjectCommand::Remove {
             name,
             delete_worktrees,
+            yes,
         } => {
+            if !yes {
+                let prompt = if delete_worktrees {
+                    format!("Remove project '{}' and delete all worktrees?", name)
+                } else {
+                    format!("Remove project '{}'?", name)
+                };
+                if !confirm_yn(&prompt)? {
+                    println!("Cancelled.");
+                    return Ok(());
+                }
+            }
             client::project_remove(paths, name, delete_worktrees).await?;
-            println!("ok");
+            println!("Removed project.");
             Ok(())
         }
         ProjectCommand::Status { name } => {
@@ -1297,10 +1616,24 @@ async fn dispatch_agent(command: AgentCommand, paths: &MurmurPaths) -> anyhow::R
         }
         AgentCommand::List { project } => {
             let resp = client::agent_list(paths).await?;
-            for a in resp.agents {
-                if project.as_ref().is_some_and(|p| p != &a.project) {
-                    continue;
+            let agents: Vec<_> = resp
+                .agents
+                .into_iter()
+                .filter(|a| project.as_ref().map_or(true, |p| p == &a.project))
+                .collect();
+
+            if agents.is_empty() {
+                println!("No running agents.");
+                if let Some(p) = &project {
+                    println!();
+                    println!("Start orchestration to spawn agents:");
+                    println!("  mm project start {}", p);
                 }
+                return Ok(());
+            }
+
+            println!("ID\tPROJECT\tROLE\tSTATE\tISSUE");
+            for a in agents {
                 println!(
                     "{}\t{}\t{}\t{}\t{}",
                     a.id,
@@ -1502,119 +1835,6 @@ fn format_chat_role(role: murmur_protocol::ChatRole) -> &'static str {
     }
 }
 
-async fn dispatch_orchestration(
-    command: OrchestrationCommand,
-    paths: &MurmurPaths,
-) -> anyhow::Result<()> {
-    match command {
-        OrchestrationCommand::Start { project, all } => {
-            if project.is_none() && !all {
-                return Err(anyhow!("specify a project name or use --all"));
-            }
-            if project.is_some() && all {
-                return Err(anyhow!("cannot use both a project name and --all"));
-            }
-
-            if all {
-                let resp = client::project_list(paths).await?;
-                for p in resp.projects {
-                    client::orchestration_start(paths, p.name).await?;
-                }
-                println!("ok");
-                return Ok(());
-            }
-
-            client::orchestration_start(
-                paths,
-                project.ok_or_else(|| anyhow!("project name is required"))?,
-            )
-            .await?;
-            println!("ok");
-            Ok(())
-        }
-        OrchestrationCommand::Stop {
-            project,
-            all,
-            abort_agents,
-        } => {
-            if project.is_none() && !all {
-                return Err(anyhow!("specify a project name or use --all"));
-            }
-            if project.is_some() && all {
-                return Err(anyhow!("cannot use both a project name and --all"));
-            }
-
-            let projects = if all {
-                let resp = client::project_list(paths).await?;
-                resp.projects.into_iter().map(|p| p.name).collect()
-            } else {
-                vec![project.ok_or_else(|| anyhow!("project name is required"))?]
-            };
-
-            for project in &projects {
-                let _ = client::orchestration_stop(paths, project.to_owned()).await;
-            }
-
-            let resp = client::agent_list(paths).await?;
-            let mut active = Vec::new();
-            for agent in resp.agents {
-                if !projects.iter().any(|p| p == &agent.project) {
-                    continue;
-                }
-                if matches!(
-                    agent.state,
-                    murmur_protocol::AgentState::Starting
-                        | murmur_protocol::AgentState::Running
-                        | murmur_protocol::AgentState::NeedsResolution
-                ) {
-                    active.push(agent.id);
-                }
-            }
-
-            if abort_agents {
-                for agent_id in active {
-                    if let Err(err) = client::agent_abort(paths, agent_id, true).await {
-                        let msg = err.to_string();
-                        if msg.contains("agent not found") {
-                            continue;
-                        }
-                        return Err(err);
-                    }
-                }
-            } else if !active.is_empty() {
-                eprintln!(
-                    "note: {} agent(s) still active; stop them with `mm agent abort <id>` or re-run with `--abort-agents`",
-                    active.len()
-                );
-            }
-
-            println!("ok");
-            Ok(())
-        }
-        OrchestrationCommand::Status { project } => {
-            let resp = client::orchestration_status(paths, project).await?;
-            println!("project\t{}", resp.project);
-            println!("running\t{}", resp.running);
-            println!("max_agents\t{}", resp.max_agents);
-            println!("active_agents\t{}", resp.active_agents);
-            println!("active_claims\t{}", resp.active_claims);
-            Ok(())
-        }
-    }
-}
-
-async fn dispatch_claim(command: ClaimCommand, paths: &MurmurPaths) -> anyhow::Result<()> {
-    match command {
-        ClaimCommand::List { project } => {
-            let resp = client::claim_list(paths, project).await?;
-            for c in resp.claims {
-                println!("{}\t{}\t{}", c.project, c.issue_id, c.agent_id);
-            }
-            Ok(())
-        }
-    }
-}
-
 async fn dispatch_branch(command: BranchCommand) -> anyhow::Result<()> {
     match command {
         BranchCommand::Cleanup { dry_run, local } => branch_cleanup(dry_run, local).await,
@@ -1793,11 +2013,19 @@ async fn dispatch_issue(args: IssueArgs, paths: &MurmurPaths) -> anyhow::Result<
 
     match args.command {
         IssueCommand::List { status } => {
-            let mut resp = client::issue_list(paths, project).await?;
+            let mut resp = client::issue_list(paths, project.clone()).await?;
             if let Some(status) = status.as_deref() {
                 let status = parse_issue_status(status)?;
                 resp.issues.retain(|iss| iss.status == status);
             }
+            if resp.issues.is_empty() {
+                println!("No issues found.");
+                println!();
+                println!("Create an issue with:");
+                println!("  mm issue create \"Title\" -p {}", project);
+                return Ok(());
+            }
+            println!("ID\tSTATUS\tTITLE");
             for iss in resp.issues {
                 println!(
                     "{}\t{}\t{}",
@@ -1832,7 +2060,14 @@ async fn dispatch_issue(args: IssueArgs, paths: &MurmurPaths) -> anyhow::Result<
             Ok(())
         }
         IssueCommand::Ready => {
-            let resp = client::issue_ready(paths, project).await?;
+            let resp = client::issue_ready(paths, project.clone()).await?;
+            if resp.issues.is_empty() {
+                println!("No ready issues.");
+                println!();
+                println!("Ready issues are open with no unresolved dependencies.");
+                return Ok(());
+            }
+            println!("ID\tTITLE");
             for iss in resp.issues {
                 println!("{}\t{}", iss.id, iss.title);
             }
@@ -2181,7 +2416,10 @@ fn plan_list_stored(paths: &MurmurPaths) -> anyhow::Result<()> {
     let entries = match fs::read_dir(&paths.plans_dir) {
         Ok(v) => v,
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            println!("No stored plans");
+            println!("No stored plans.");
+            println!();
+            println!("Start a planner with:");
+            println!("  mm agent plan \"Your planning prompt\"");
             return Ok(());
         }
         Err(err) => {

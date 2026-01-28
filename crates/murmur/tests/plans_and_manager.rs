@@ -498,8 +498,8 @@ fn project_remove_delete_worktrees_removes_worktrees() {
 
     let mut remove = cargo_bin_cmd!("mm");
     remove.env("MURMUR_DIR", murmur_dir.path());
-    remove.args(["project", "remove", "demo", "--delete-worktrees"]);
-    remove.assert().success().stdout("ok\n");
+    remove.args(["project", "remove", "demo", "--delete-worktrees", "-y"]);
+    remove.assert().success().stdout("Removed project.\n");
 
     assert!(!worktree_dir.exists(), "worktree dir should be removed");
 

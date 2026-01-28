@@ -12,12 +12,15 @@ fn agent_help_hides_internal_subcommands() {
 
     cmd.assert()
         .success()
+        // User-facing commands should be visible
         .stdout(has_cmd("list"))
         .stdout(has_cmd("abort"))
         .stdout(has_cmd("plan"))
-        .stdout(has_cmd("claim"))
-        .stdout(has_cmd("describe"))
-        .stdout(has_cmd("done"))
+        .stdout(has_cmd("sync-comments"))
+        // Internal/agent-callable commands should be hidden
+        .stdout(has_cmd("claim").not())
+        .stdout(has_cmd("describe").not())
+        .stdout(has_cmd("done").not())
         .stdout(has_cmd("create").not())
         .stdout(has_cmd("delete").not())
         .stdout(has_cmd("send-message").not())
@@ -32,9 +35,11 @@ fn plan_help_is_storage_only() {
 
     cmd.assert()
         .success()
+        // Storage commands should be visible
         .stdout(has_cmd("list"))
         .stdout(has_cmd("read"))
-        .stdout(has_cmd("write"))
+        // Agent/internal commands should be hidden
+        .stdout(has_cmd("write").not())
         .stdout(has_cmd("start").not())
         .stdout(has_cmd("stop").not())
         .stdout(has_cmd("list-running").not())

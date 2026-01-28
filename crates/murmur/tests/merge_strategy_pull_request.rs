@@ -312,7 +312,7 @@ async fn agent_done_pull_request_creates_pr_and_keeps_worktree() {
 
     let mut claims = cargo_bin_cmd!("mm");
     claims.env("MURMUR_DIR", murmur_dir.path());
-    claims.args(["claim", "list", "--project", "demo"]);
+    claims.args(["claims", "--project", "demo"]);
     claims
         .assert()
         .success()

@@ -299,6 +299,8 @@ pub enum Effect {
         projects: Vec<String>,
     },
     ReconnectStream,
+    /// Force a full terminal clear and redraw
+    ForceFullRedraw,
     Quit,
 }
 
@@ -489,6 +491,7 @@ pub fn reduce(mut model: Model, msg: Msg) -> (Model, Vec<Effect>) {
                                         model.show_tool_events,
                                     );
                                 }
+                                effects.push(Effect::ForceFullRedraw);
                             }
                             'j' => {
                                 let (next, more) = reduce(model, Msg::Action(Action::MoveDown));
@@ -1958,6 +1961,7 @@ mod tests {
             max_agents: 1,
             running: false,
             backend: "claude".to_owned(),
+            user_intervening: false,
         }];
 
         let (model, effects) = reduce(model, Msg::Action(Action::Char('p')));

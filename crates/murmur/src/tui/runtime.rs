@@ -85,7 +85,7 @@ pub async fn run(client: Arc<dyn TuiClient>) -> Result<()> {
     let mut stream: Option<EventStream> = None;
 
     let (next, effects) = reduce(model, Msg::Init);
-    let (mut model, quit) =
+    let (mut model, quit, _) =
         apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
     if quit {
         shutdown.store(true, Ordering::Relaxed);
@@ -99,8 +99,11 @@ pub async fn run(client: Arc<dyn TuiClient>) -> Result<()> {
             msg = msg_rx.recv() => {
                 let Some(msg) = msg else { break };
                 let (next, effects) = reduce(model, msg);
-                let (next, quit) = apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
+                let (next, quit, needs_clear) = apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
                 model = next;
+                if needs_clear {
+                    terminal.clear().context("clear terminal")?;
+                }
                 if model.dirty {
                     terminal.draw(|f| view::draw(f, &model)).context("draw")?;
                     model.dirty = false;
@@ -111,8 +114,11 @@ pub async fn run(client: Arc<dyn TuiClient>) -> Result<()> {
             effect_result = effect_rx.recv() => {
                 let Some(msg) = effect_result else { continue };
                 let (next, effects) = reduce(model, msg);
-                let (next, quit) = apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
+                let (next, quit, needs_clear) = apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
                 model = next;
+                if needs_clear {
+                    terminal.clear().context("clear terminal")?;
+                }
                 if model.dirty {
                     terminal.draw(|f| view::draw(f, &model)).context("draw")?;
                     model.dirty = false;
@@ -169,8 +175,11 @@ pub async fn run(client: Arc<dyn TuiClient>) -> Result<()> {
 
                         if let Some(msg) = msg {
                             let (next, effects) = reduce(model, msg);
-                            let (next, quit) = apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
+                            let (next, quit, needs_clear) = apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
                             model = next;
+                            if needs_clear {
+                                terminal.clear().context("clear terminal")?;
+                            }
                             if model.dirty {
                                 terminal.draw(|f| view::draw(f, &model)).context("draw")?;
                                 model.dirty = false;
@@ -181,7 +190,7 @@ pub async fn run(client: Arc<dyn TuiClient>) -> Result<()> {
                     Some(Err(err)) => {
                         stream = None;
                         let (next, effects) = reduce(model, Msg::StreamDisconnected { reason: err.to_string() });
-                        let (next, _quit) = apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
+                        let (next, _quit, _) = apply_effects(next, effects, client.clone(), &mut stream, &effect_tx).await?;
                         model = next;
                         if model.dirty {
                             terminal.draw(|f| view::draw(f, &model)).context("draw")?;
@@ -306,14 +315,16 @@ fn map_key(key: KeyEvent) -> Option<Action> {
 /// Apply effects, spawning background tasks for network operations.
 /// Non-blocking effects are spawned immediately and results are sent through effect_tx.
 /// Stream-related effects must be processed synchronously since they manage stream state.
+/// Returns (model, quit, needs_terminal_clear).
 async fn apply_effects(
     mut model: Model,
     effects: Vec<Effect>,
     client: Arc<dyn TuiClient>,
     stream: &mut Option<EventStream>,
     effect_tx: &mpsc::UnboundedSender<Msg>,
-) -> Result<(Model, bool)> {
+) -> Result<(Model, bool, bool)> {
     let mut quit = false;
+    let mut needs_clear = false;
     let mut sync_effects = Vec::new();
 
     for effect in effects {
@@ -473,6 +484,10 @@ async fn apply_effects(
             Effect::AttachStream { .. } | Effect::ReconnectStream => {
                 sync_effects.push(effect);
             }
+            // ForceFullRedraw triggers a terminal clear
+            Effect::ForceFullRedraw => {
+                needs_clear = true;
+            }
         }
     }
 
@@ -486,11 +501,12 @@ async fn apply_effects(
                         *stream = Some(s);
                         let (next, more) = reduce(model, Msg::StreamConnected);
                         // Recursively apply any new effects
-                        let (next, q) =
+                        let (next, q, c) =
                             Box::pin(apply_effects(next, more, client.clone(), stream, effect_tx))
                                 .await?;
                         model = next;
                         quit = quit || q;
+                        needs_clear = needs_clear || c;
                     }
                     Err(err) => {
                         let (next, more) = reduce(
@@ -499,11 +515,12 @@ async fn apply_effects(
                                 reason: err.to_string(),
                             },
                         );
-                        let (next, q) =
+                        let (next, q, c) =
                             Box::pin(apply_effects(next, more, client.clone(), stream, effect_tx))
                                 .await?;
                         model = next;
                         quit = quit || q;
+                        needs_clear = needs_clear || c;
                     }
                 }
             }
@@ -513,11 +530,12 @@ async fn apply_effects(
                     Ok(s) => {
                         *stream = Some(s);
                         let (next, more) = reduce(model, Msg::StreamConnected);
-                        let (next, q) =
+                        let (next, q, c) =
                             Box::pin(apply_effects(next, more, client.clone(), stream, effect_tx))
                                 .await?;
                         model = next;
                         quit = quit || q;
+                        needs_clear = needs_clear || c;
                     }
                     Err(err) => {
                         let (next, more) = reduce(
@@ -526,11 +544,12 @@ async fn apply_effects(
                                 reason: err.to_string(),
                             },
                         );
-                        let (next, q) =
+                        let (next, q, c) =
                             Box::pin(apply_effects(next, more, client.clone(), stream, effect_tx))
                                 .await?;
                         model = next;
                         quit = quit || q;
+                        needs_clear = needs_clear || c;
                     }
                 }
             }
@@ -538,7 +557,7 @@ async fn apply_effects(
         }
     }
 
-    Ok((model, quit))
+    Ok((model, quit, needs_clear))
 }
 
 #[cfg(test)]

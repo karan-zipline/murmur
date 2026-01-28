@@ -266,9 +266,22 @@ fn claude_settings_include_shell_safe_hook_commands() {
     assert!(!perm_cmd.contains(" (deleted)"));
     assert!(!stop_cmd.contains(" (deleted)"));
 
-    assert_eq!(pre_cmd, "'/tmp/mm hook exe' 'hook' 'PreToolUse'");
-    assert_eq!(perm_cmd, "'/tmp/mm hook exe' 'hook' 'PermissionRequest'");
-    assert_eq!(stop_cmd, "'/tmp/mm hook exe' 'hook' 'Stop'");
+    // Commands include --socket-path <path> before the hook subcommand
+    assert!(
+        pre_cmd.starts_with("'/tmp/mm hook exe' '--socket-path'")
+            && pre_cmd.ends_with("'hook' 'PreToolUse'"),
+        "unexpected pre hook command: {pre_cmd}"
+    );
+    assert!(
+        perm_cmd.starts_with("'/tmp/mm hook exe' '--socket-path'")
+            && perm_cmd.ends_with("'hook' 'PermissionRequest'"),
+        "unexpected perm hook command: {perm_cmd}"
+    );
+    assert!(
+        stop_cmd.starts_with("'/tmp/mm hook exe' '--socket-path'")
+            && stop_cmd.ends_with("'hook' 'Stop'"),
+        "unexpected stop hook command: {stop_cmd}"
+    );
 
     shutdown_daemon(&murmur_dir, daemon);
 }
