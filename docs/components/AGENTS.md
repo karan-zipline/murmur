@@ -1,11 +1,14 @@
 # Agents
 
-Murmur manages multiple “agents” per project. An agent is a long-lived subprocess running in an isolated git worktree and connected to the daemon via stdin/stdout streams.
+Murmur manages multiple "agents" per project. An agent is a long-lived subprocess running in an isolated git worktree.
+
+Agents run inside **host processes** (`murmur-host`) which wrap the agent subprocess and expose a Unix socket for daemon communication. This architecture allows agents to survive daemon restarts. See [Agent Host](AGENT_HOST.md) for details on the host protocol.
 
 Agent roles:
 - `coding` — implements an issue and signals completion (`agent done`)
 - `planner` — produces a plan artifact under `plans/`
 - `manager` — project-scoped interactive coordinator (restricted capabilities)
+- `director` — global cross-project coordinator (singleton)
 
 Code pointers:
 - Domain state machine: `crates/murmur-core/src/agent.rs`
@@ -14,6 +17,7 @@ Code pointers:
 - Agent RPC: `crates/murmur/src/daemon/rpc/agent.rs`
 - Planner RPC: `crates/murmur/src/daemon/rpc/plan.rs`
 - Manager RPC: `crates/murmur/src/daemon/rpc/manager.rs`
+- Director RPC: `crates/murmur/src/daemon/rpc/director.rs`
 - Stream parsing: `crates/murmur-core/src/stream/`
 
 ---

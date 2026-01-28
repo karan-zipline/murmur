@@ -89,6 +89,63 @@ mm agent sync-comments <agent-id>
 
 ---
 
+## Orchestration Settings
+
+Optional configuration for orchestration behavior:
+
+```toml
+[orchestration]
+silence-threshold-secs = 60  # Seconds of user silence before resuming spawning (default: 60)
+```
+
+When a user sends a message to any agent in a project (coding agent, manager, or planner), the orchestrator pauses automatic agent spawning for that project until the silence threshold is reached. This prevents the system from spawning new agents while the user is actively working.
+
+Set `silence-threshold-secs = 0` to disable intervention detection (always allow spawning).
+
+Per-project override is available via `silence-threshold-secs` in `[[projects]]`.
+
+---
+
+## Director Configuration (`director.toml`)
+
+The director agent reads its configuration from a separate file:
+
+Path: `~/.murmur/config/director.toml` (or `$MURMUR_DIR/config/director.toml`)
+
+```toml
+[director]
+allowed_patterns = ["mm:*"]
+```
+
+### Allowed Patterns
+
+The `allowed_patterns` list controls which bash commands the director can execute. Pattern format:
+
+| Pattern | Effect |
+|---------|--------|
+| `mm:*` | Allow any `mm` command |
+| `git:*` | Allow any `git` command |
+| `ls:*` | Allow `ls` with any arguments |
+| `:*` | Allow all commands (not recommended) |
+| `mm issue:*` | Allow `mm issue` subcommands |
+
+By default, no patterns are configured (the director cannot run bash commands).
+
+**Example:** Allow the director to manage projects and issues:
+
+```toml
+[director]
+allowed_patterns = [
+    "mm:*",
+    "git status:*",
+    "git log:*"
+]
+```
+
+See also: `docs/components/PERMISSIONS_AND_QUESTIONS.md` for the full pattern syntax.
+
+---
+
 ## Projects (`[[projects]]`)
 
 Each project stores:
@@ -103,6 +160,7 @@ Each project stores:
 - `allowed-authors` — used by backends that support author filtering (notably GitHub)
 - `linear-team` (required for Linear), `linear-project` (optional)
 - `merge-strategy` — `direct | pull-request`
+- `silence-threshold-secs` — per-project override for intervention detection (0 = use global)
 
 You can inspect and edit via:
 - `mm project config show <project>`

@@ -86,9 +86,28 @@ The global permissions file can contain:
 allowed_patterns = ["murmur:*", "git :*"]
 ```
 
-Murmur translates these patterns into Claude “allow” settings for the manager agent.
+Murmur translates these patterns into Claude "allow" settings for the manager agent.
 
-Default is conservative: `["murmur:*"]`.
+Default is conservative: `["mm:*"]`.
+
+---
+
+## Director Agent Restrictions
+
+The director agent is a global singleton for cross-project coordination.
+
+Director restrictions are configured in a separate file:
+
+`~/.murmur/config/director.toml` (or `$MURMUR_DIR/config/director.toml`)
+
+```toml
+[director]
+allowed_patterns = ["mm:*"]
+```
+
+Murmur translates these patterns into Claude "allow" settings for the director agent.
+
+Default is empty (no bash commands allowed). Unlike managers, directors have no default patterns and must be explicitly configured.
 
 ---
 

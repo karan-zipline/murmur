@@ -93,6 +93,58 @@ Merge serialization is per project to avoid concurrent merges stepping on each o
 
 ---
 
+## User Intervention Detection
+
+When a user sends a message to any agent in a project (coding agent, manager, or planner), the orchestrator pauses automatic agent spawning to avoid interference.
+
+### How It Works
+
+1. User activity is tracked per-project in the daemon state.
+2. Activity is recorded when users:
+   - Send a message to a coding agent (`mm agent send`)
+   - Send a message to a manager (`mm manager send`)
+   - Send a message to a planner (`mm plan send`)
+   - Respond to a permission request
+   - Respond to a user question
+3. Before spawning new agents, the orchestrator checks:
+   - How long since the last user activity
+   - If within the silence threshold, spawning is skipped
+
+### Configuration
+
+Global default (60 seconds, matching fab):
+```toml
+[orchestration]
+silence-threshold-secs = 60
+```
+
+Per-project override:
+```toml
+[[projects]]
+name = "my-project"
+silence-threshold-secs = 30  # Override for this project
+```
+
+Set to `0` to disable intervention detection.
+
+### CLI Status
+
+Check intervention status via:
+```bash
+mm project status <name>
+```
+
+Output includes:
+- `user_intervention active (last activity: Xs ago, threshold: Ys)` — spawning paused
+- `user_intervention inactive (last activity: Xs ago, threshold: Ys)` — spawning allowed
+- `user_intervention no activity recorded` — no user activity tracked yet
+
+### TUI Display
+
+The TUI header shows `⏸ user active` when any project has active intervention.
+
+---
+
 ## Webhook Tick Requests (Optional)
 
 If the webhook server is enabled, incoming GitHub/Linear events can request a tick:

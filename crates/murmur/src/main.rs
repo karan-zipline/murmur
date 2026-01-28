@@ -166,6 +166,19 @@ enum Command {
         command: CommitCommand,
     },
 
+    /// Manage agent host processes (advanced)
+    #[command(
+        long_about = "Manage agent host processes that wrap agent subprocesses.\n\n\
+            Hosts survive daemon restarts and communicate via Unix sockets.\n\n\
+            Examples:\n  \
+            mm host list\n  \
+            mm host status a-1"
+    )]
+    Host {
+        #[command(subcommand)]
+        command: HostCommand,
+    },
+
     /// Print version information
     Version,
 
@@ -743,6 +756,22 @@ enum CommitCommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum HostCommand {
+    /// List running agent hosts
+    #[command(alias = "ls")]
+    List,
+
+    /// Show status of a specific host
+    Status {
+        /// Agent ID
+        agent_id: String,
+    },
+
+    /// Discover and reconnect to running hosts
+    Discover,
+}
+
+#[derive(Subcommand, Debug)]
 enum HookCommand {
     #[command(name = "PreToolUse", alias = "pre-tool-use")]
     PreToolUse,
@@ -1054,6 +1083,7 @@ async fn dispatch(command: Command, paths: &MurmurPaths) -> anyhow::Result<()> {
         }
         Command::Branch { command } => dispatch_branch(command).await,
         Command::Commit { command } => dispatch_commit(command, paths).await,
+        Command::Host { command } => dispatch_host(command, paths).await,
         Command::Hook { command } => dispatch_hook(command, paths).await,
         Command::Plan { command } => dispatch_plan(command, paths).await,
         Command::Manager { command } => dispatch_manager(command, paths).await,
@@ -1079,6 +1109,64 @@ fn completion(command: CompletionCommand) -> anyhow::Result<()> {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
         Err(err) => Err(err).context("write completion script to stdout"),
+    }
+}
+
+async fn dispatch_host(command: HostCommand, paths: &MurmurPaths) -> anyhow::Result<()> {
+    use murmur::daemon::host_manager::HostManager;
+
+    let hosts_dir = paths.runtime_dir.join("hosts");
+    let manager = HostManager::new(hosts_dir, paths.murmur_dir.clone(), paths.socket_path.clone());
+
+    match command {
+        HostCommand::List => {
+            let discovered = manager.discover_and_reconnect().await?;
+            if discovered.is_empty() {
+                println!("No running hosts.");
+                return Ok(());
+            }
+            println!("AGENT\tSTATE\tPROJECT\tBACKEND");
+            for agent in discovered {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    agent.id,
+                    agent.state,
+                    agent.project,
+                    agent.backend
+                );
+            }
+            Ok(())
+        }
+        HostCommand::Status { agent_id } => {
+            let discovered = manager.discover_and_reconnect().await?;
+            let agent = discovered
+                .into_iter()
+                .find(|a| a.id == agent_id)
+                .ok_or_else(|| anyhow!("host not found: {}", agent_id))?;
+
+            println!("id\t{}", agent.id);
+            println!("state\t{}", agent.state);
+            println!("project\t{}", agent.project);
+            println!("backend\t{}", agent.backend);
+            println!("role\t{}", agent.role);
+            println!("worktree\t{}", agent.worktree);
+            println!("started_at_ms\t{}", agent.started_at_ms);
+            if let Some(pid) = agent.pid {
+                println!("pid\t{}", pid);
+            }
+            if let Some(issue_id) = agent.issue_id {
+                println!("issue_id\t{}", issue_id);
+            }
+            Ok(())
+        }
+        HostCommand::Discover => {
+            let discovered = manager.discover_and_reconnect().await?;
+            println!("Discovered {} running host(s).", discovered.len());
+            for agent in &discovered {
+                println!("  {} ({})", agent.id, agent.project);
+            }
+            Ok(())
+        }
     }
 }
 

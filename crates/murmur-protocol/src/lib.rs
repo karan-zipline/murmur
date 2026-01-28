@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+pub mod host;
+
 pub const PROTOCOL_VERSION: &str = "0.1";
 
 pub const MSG_PING: &str = "ping";

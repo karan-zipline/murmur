@@ -17,8 +17,12 @@ Complete reference for the `mm` command-line interface.
 | `mm agent abort <id>` | Stop an agent |
 | `mm issue list -p <proj>` | List issues |
 | `mm issue create -p <proj> "title"` | Create an issue |
+| `mm manager start <proj>` | Start project manager |
+| `mm director start` | Start global director |
 | `mm tui` | Open terminal UI |
 | `mm attach` | Stream daemon events |
+| `mm host list` | List agent hosts |
+| `mm host discover` | Reconnect to orphaned hosts |
 
 ### Command Structure
 
@@ -26,12 +30,29 @@ Complete reference for the `mm` command-line interface.
 mm [OPTIONS] <COMMAND> [ARGS]
 
 Global Options:
-  --murmur-dir <PATH>    Override base directory (~/.murmur)
+  --murmur-dir <DIR>     Override base directory (~/.murmur)
   --socket-path <PATH>   Override daemon socket path
-  --log-level <LEVEL>    Set log level (error, warn, info, debug, trace)
+  --log-level <LEVEL>    Set log level [error, warn, info, debug, trace]
   -h, --help             Show help
   -V, --version          Show version
 ```
+
+### Command Aliases
+
+Many commands have short aliases for convenience:
+
+| Command | Alias |
+|---------|-------|
+| `mm project list` | `mm project ls` |
+| `mm project add` | `mm project new` |
+| `mm project remove` | `mm project rm` |
+| `mm agent list` | `mm agent ls` |
+| `mm agent abort` | `mm agent kill` |
+| `mm issue list` | `mm issue ls` |
+| `mm issue create` | `mm issue new` |
+| `mm plan list` | `mm plan ls` |
+| `mm plan read` | `mm plan show` |
+| `mm commit list` | `mm commit ls` |
 
 ---
 
@@ -45,13 +66,13 @@ Start the Murmur daemon.
 mm server start [OPTIONS]
 
 Options:
-  --foreground    Run in foreground (don't daemonize)
+  -f, --foreground    Run in foreground (don't daemonize)
 ```
 
 **Examples:**
 ```bash
-mm server start              # Start in background
-mm server start --foreground # Start in foreground (for development)
+mm server start       # Start in background
+mm server start -f    # Start in foreground (for development)
 ```
 
 ### `mm server stop`
@@ -80,7 +101,7 @@ Restart the daemon.
 mm server restart [OPTIONS]
 
 Options:
-  --foreground    Run in foreground after restart
+  -f, --foreground    Run in foreground after restart
 ```
 
 ---
@@ -98,17 +119,21 @@ Arguments:
   <PATH_OR_URL>    Git URL or local path to clone
 
 Options:
-  --name <NAME>         Project name (inferred from URL if omitted)
-  --max-agents <N>      Max concurrent agents (default: 3)
-  --autostart           Start orchestration when daemon starts
-  --backend <BACKEND>   Agent backend: claude, codex (default: claude)
+  -n, --name <NAME>         Project name (inferred from URL if omitted)
+  -m, --max-agents <N>      Max concurrent agents (default: 3)
+  -b, --backend <BACKEND>   AI backend [claude, codex] (default: claude)
+      --autostart           Start orchestration when daemon starts
+      --remote-url <URL>    Override remote URL
 ```
+
+Alias: `mm project new`
 
 **Examples:**
 ```bash
 mm project add https://github.com/org/repo.git
-mm project add https://github.com/org/repo.git --name myproj
-mm project add git@github.com:org/repo.git --max-agents 5 --autostart
+mm project add git@github.com:org/repo.git -n myproj
+mm project add /path/to/local/repo -m 5
+mm project add <url> --autostart -b codex
 ```
 
 ### `mm project list`
@@ -119,7 +144,11 @@ List all registered projects.
 mm project list
 ```
 
-Output format: tab-separated (script-friendly).
+Alias: `mm project ls`
+
+Output: `NAME<tab>REMOTE`
+
+When empty, shows hint: "Add a project with: mm project add <url>"
 
 ### `mm project remove`
 
@@ -129,8 +158,13 @@ Remove a project from the registry.
 mm project remove <NAME> [OPTIONS]
 
 Options:
-  --delete-worktrees    Also delete agent worktrees
+      --delete-worktrees    Also delete agent worktrees
+  -y, --yes                 Skip confirmation prompt
 ```
+
+Alias: `mm project rm`
+
+**Note:** Requires confirmation unless `--yes` is specified.
 
 ### `mm project status`
 
@@ -146,7 +180,13 @@ Start orchestration for a project.
 
 ```bash
 mm project start <NAME>
-mm project start --all
+mm project start -a, --all
+```
+
+**Examples:**
+```bash
+mm project start myproject
+mm project start -a    # Start all projects
 ```
 
 ### `mm project stop`
@@ -154,12 +194,18 @@ mm project start --all
 Stop orchestration for a project.
 
 ```bash
-mm project stop <NAME>
-mm project stop --all
-```
+mm project stop <NAME> [OPTIONS]
+mm project stop -a, --all [OPTIONS]
 
 Options:
-  --abort-agents    Also abort active coding agents
+      --abort-agents    Also abort active coding agents
+```
+
+**Examples:**
+```bash
+mm project stop myproject
+mm project stop -a --abort-agents
+```
 
 ### `mm project config`
 
@@ -198,29 +244,38 @@ mm project config show myproj
 mm project config get myproj max-agents
 mm project config set myproj issue-backend github
 mm project config set myproj max-agents 5
-mm project config set myproj allowed-authors '["user1", "user2"]'
 ```
 
 ---
 
 ## Issue Commands
 
-All issue commands support `--project <NAME>` (or `-p <NAME>`). If omitted, the project is inferred from the current working directory.
+All issue commands support `-p, --project <NAME>`. If omitted, the project is inferred from the current working directory.
 
 ### `mm issue list`
 
 List issues from the configured backend.
 
 ```bash
-mm issue list --project <NAME>
+mm issue list [OPTIONS]
+
+Options:
+  -p, --project <NAME>     Project name
+  -s, --status <STATUS>    Filter by status [open, closed, blocked]
 ```
+
+Alias: `mm issue ls`
+
+Output: `ID<tab>STATUS<tab>TITLE`
+
+When empty, shows hint: "Create an issue with: mm issue create"
 
 ### `mm issue show`
 
 Show details of a specific issue.
 
 ```bash
-mm issue show <ISSUE_ID> --project <NAME>
+mm issue show <ISSUE_ID> -p <NAME>
 ```
 
 ### `mm issue ready`
@@ -228,30 +283,35 @@ mm issue show <ISSUE_ID> --project <NAME>
 List issues that are ready to be worked on (open, no open dependencies).
 
 ```bash
-mm issue ready --project <NAME>
+mm issue ready -p <NAME>
 ```
+
+Output: `ID<tab>TITLE`
 
 ### `mm issue create`
 
-Create a new issue (tk backend).
+Create a new issue.
 
 ```bash
-mm issue create <TITLE> --project <NAME> [OPTIONS]
+mm issue create <TITLE> [OPTIONS]
 
 Options:
-  --description <TEXT>    Issue description
-  --type <TYPE>           Issue type (e.g., task, bug, feature)
-  --priority <N>          Priority (default: 0)
-  --depends-on <ID>       Add dependency on another issue
-  --parent <ID>           Set parent issue
-  --commit                Immediately commit the new ticket
+  -p, --project <NAME>       Project name
+  -d, --description <TEXT>   Issue description
+      --type <TYPE>          Issue type [task, bug, feature, chore] (default: task)
+      --priority <N>         Priority [0=low, 1=medium, 2=high] (default: 1)
+      --depends-on <IDS>     Dependencies (comma-separated issue IDs)
+      --parent <ID>          Parent issue ID (creates a sub-issue)
+      --commit               Immediately commit (tk only)
 ```
+
+Alias: `mm issue new`
 
 **Examples:**
 ```bash
 mm issue create "Add user authentication" -p myproj
-mm issue create "Fix login bug" -p myproj --type bug --priority 1
-mm issue create "Refactor API" -p myproj --description "Improve error handling"
+mm issue create "Fix login bug" -p myproj --type bug --priority 2
+mm issue create "Refactor API" -p myproj -d "Improve error handling"
 ```
 
 ### `mm issue update`
@@ -259,12 +319,19 @@ mm issue create "Refactor API" -p myproj --description "Improve error handling"
 Update an existing issue.
 
 ```bash
-mm issue update <ISSUE_ID> --project <NAME> [OPTIONS]
+mm issue update <ISSUE_ID> [OPTIONS]
 
 Options:
-  --title <TEXT>          New title
-  --status <STATUS>       open, blocked, closed
-  --priority <N>          New priority
+  -p, --project <NAME>    Project name
+  -t, --title <TEXT>      New title
+  -s, --status <STATUS>   New status [open, closed, blocked]
+      --priority <N>      New priority [0, 1, 2]
+```
+
+**Examples:**
+```bash
+mm issue update 42 -s closed
+mm issue update 42 -t "New title" --priority 2
 ```
 
 ### `mm issue close`
@@ -272,7 +339,7 @@ Options:
 Close an issue.
 
 ```bash
-mm issue close <ISSUE_ID> --project <NAME>
+mm issue close <ISSUE_ID> -p <NAME>
 ```
 
 ### `mm issue comment`
@@ -280,7 +347,11 @@ mm issue close <ISSUE_ID> --project <NAME>
 Add a comment to an issue.
 
 ```bash
-mm issue comment <ISSUE_ID> --project <NAME> --body <TEXT>
+mm issue comment <ISSUE_ID> [OPTIONS]
+
+Options:
+  -p, --project <NAME>    Project name
+  -b, --body <TEXT>       Comment body
 ```
 
 ### `mm issue plan`
@@ -288,8 +359,12 @@ mm issue comment <ISSUE_ID> --project <NAME> --body <TEXT>
 Upsert a `## Plan` section in the issue body.
 
 ```bash
-mm issue plan <ISSUE_ID> --project <NAME> --file <PATH>
-mm issue plan <ISSUE_ID> --project <NAME> --body <TEXT>
+mm issue plan <ISSUE_ID> [OPTIONS]
+
+Options:
+  -p, --project <NAME>    Project name
+  -b, --body <TEXT>       Plan content
+  -f, --file <PATH>       Read plan from file
 ```
 
 ### `mm issue commit`
@@ -297,7 +372,7 @@ mm issue plan <ISSUE_ID> --project <NAME> --body <TEXT>
 Commit and push ticket changes (tk backend only).
 
 ```bash
-mm issue commit --project <NAME>
+mm issue commit -p <NAME>
 ```
 
 ---
@@ -312,21 +387,14 @@ List all running agents.
 mm agent list [OPTIONS]
 
 Options:
-  --project <NAME>    Filter by project
+  -p, --project <NAME>    Filter by project
 ```
 
-Output columns: ID, Project, Issue, State, Backend.
+Alias: `mm agent ls`
 
-### `mm agent create`
+Output: `ID<tab>PROJECT<tab>ROLE<tab>STATE<tab>ISSUE`
 
-Manually create a coding agent.
-
-```bash
-mm agent create <PROJECT> <ISSUE_ID> [OPTIONS]
-
-Options:
-  --backend <BACKEND>    claude, codex
-```
+When empty, shows hint: "Start orchestration to spawn agents"
 
 ### `mm agent abort`
 
@@ -336,43 +404,13 @@ Stop an agent.
 mm agent abort <AGENT_ID> [OPTIONS]
 
 Options:
-  --force    Force kill if graceful abort fails
-  --yes      Skip confirmation prompt
+  -f, --force    Force kill immediately (SIGKILL)
+  -y, --yes      Skip confirmation prompt
 ```
 
-### `mm agent done`
+Alias: `mm agent kill`
 
-Signal agent completion (used by agent processes).
-
-```bash
-mm agent done [OPTIONS]
-
-Options:
-  --task <ID>      Task/issue ID (optional)
-  --error <TEXT>   Error message if failed
-
-Requires: MURMUR_AGENT_ID environment variable
-```
-
-### `mm agent claim`
-
-Claim an issue for the current agent (used by agent processes).
-
-```bash
-mm agent claim <ISSUE_ID>
-
-Requires: MURMUR_AGENT_ID environment variable
-```
-
-### `mm agent describe`
-
-Set a description for the current agent (used by agent processes).
-
-```bash
-mm agent describe <TEXT>
-
-Requires: MURMUR_AGENT_ID environment variable
-```
+**Note:** Requires confirmation unless `--yes` is specified.
 
 ### `mm agent sync-comments`
 
@@ -382,12 +420,16 @@ Manually fetch and inject new comments for an agent.
 mm agent sync-comments <AGENT_ID>
 ```
 
-This fetches any new comments on the agent's claimed issue and delivers them to the agent. Useful for testing or when automatic comment polling is disabled.
+This fetches any new comments on the agent's claimed issue and delivers them to the agent.
 
-**Example:**
+### Agent-Callable Commands
+
+These commands are used by agent processes (require `MURMUR_AGENT_ID` environment variable):
+
 ```bash
-mm agent sync-comments a-1
-# Output: Injected 2 comment(s)
+mm agent claim <ISSUE_ID>      # Claim an issue
+mm agent describe <TEXT>       # Set agent description
+mm agent done [--task ID] [--error TEXT]   # Signal completion
 ```
 
 ---
@@ -399,8 +441,16 @@ mm agent sync-comments a-1
 Start a planner agent.
 
 ```bash
-mm agent plan --project <NAME> <PROMPT>
-mm agent plan <PROMPT>    # Project-less planner
+mm agent plan [OPTIONS] <PROMPT>
+
+Options:
+  -p, --project <NAME>    Project (optional, uses ~/.murmur/planners/ if omitted)
+```
+
+**Examples:**
+```bash
+mm agent plan "Add user authentication"
+mm agent plan -p myproject "Refactor the API layer"
 ```
 
 ### `mm agent plan list`
@@ -408,8 +458,10 @@ mm agent plan <PROMPT>    # Project-less planner
 List running planners.
 
 ```bash
-mm agent plan list --project <NAME>
+mm agent plan list [-p <NAME>]
 ```
+
+Alias: `mm agent plan ls`
 
 ### `mm agent plan stop`
 
@@ -427,6 +479,10 @@ List stored plan files.
 mm plan list
 ```
 
+Alias: `mm plan ls`
+
+When empty, shows hint: "Start a planner with: mm agent plan"
+
 ### `mm plan read`
 
 Show contents of a stored plan.
@@ -435,15 +491,7 @@ Show contents of a stored plan.
 mm plan read <PLAN_ID>
 ```
 
-### `mm plan write`
-
-Write plan content from stdin (used by planner agents).
-
-```bash
-cat plan.md | mm plan write
-
-Requires: MURMUR_AGENT_ID environment variable
-```
+Alias: `mm plan show`
 
 ---
 
@@ -462,7 +510,10 @@ mm manager start <PROJECT>
 Stop the manager agent.
 
 ```bash
-mm manager stop <PROJECT>
+mm manager stop <PROJECT> [OPTIONS]
+
+Options:
+  -y, --yes    Skip confirmation prompt
 ```
 
 ### `mm manager status`
@@ -475,7 +526,7 @@ mm manager status <PROJECT>
 
 ### `mm manager clear`
 
-Clear manager history.
+Clear manager chat history.
 
 ```bash
 mm manager clear <PROJECT>
@@ -483,7 +534,62 @@ mm manager clear <PROJECT>
 
 ---
 
+## Director Commands
+
+The director is a global agent (not project-scoped) for cross-project coordination.
+
+### `mm director start`
+
+Start the director agent.
+
+```bash
+mm director start [OPTIONS]
+
+Options:
+  -b, --backend <BACKEND>    AI backend [claude, codex] (default: claude)
+```
+
+### `mm director stop`
+
+Stop the director agent.
+
+```bash
+mm director stop [OPTIONS]
+
+Options:
+  -y, --yes    Skip confirmation prompt
+```
+
+### `mm director status`
+
+Check director status.
+
+```bash
+mm director status
+```
+
+### `mm director clear`
+
+Clear director chat history.
+
+```bash
+mm director clear
+```
+
+---
+
 ## Monitoring Commands
+
+### `mm status`
+
+Show daemon and project status.
+
+```bash
+mm status [OPTIONS]
+
+Options:
+  -a, --agents    Also display running agents
+```
 
 ### `mm tui`
 
@@ -520,12 +626,77 @@ Show active issue claims.
 mm claims [OPTIONS]
 
 Options:
-  --project <NAME>    Filter by project
+  -p, --project <NAME>    Filter by project
 ```
+
+Output: `ISSUE<tab>AGENT<tab>PROJECT`
 
 ---
 
-## Maintenance Commands
+## Host Commands
+
+Host commands are used to manage and inspect agent host processes. Agent hosts are independent processes that wrap agent subprocesses, allowing agents to survive daemon restarts.
+
+### `mm host list`
+
+List all connected agent hosts.
+
+```bash
+mm host list
+```
+
+Alias: `mm host ls`
+
+Output: `AGENT_ID<tab>PROJECT<tab>ROLE<tab>STATE`
+
+### `mm host status`
+
+Get detailed status for a specific agent host.
+
+```bash
+mm host status <AGENT_ID>
+```
+
+Returns information about the agent running in the host process.
+
+### `mm host discover`
+
+Discover and reconnect to running host processes.
+
+```bash
+mm host discover
+```
+
+Scans the hosts directory for active socket files and reconnects the daemon to any running hosts that were orphaned (e.g., after a daemon restart).
+
+---
+
+## Utility Commands
+
+### `mm stats`
+
+Show usage statistics.
+
+```bash
+mm stats [OPTIONS]
+
+Options:
+  -p, --project <NAME>    Filter by project
+```
+
+### `mm commit list`
+
+View merge commit history.
+
+```bash
+mm commit list [OPTIONS]
+
+Options:
+  -p, --project <NAME>    Filter by project
+  -n, --limit <N>         Maximum number of commits
+```
+
+Alias: `mm commit ls`
 
 ### `mm branch cleanup`
 
@@ -544,6 +715,25 @@ Options:
 mm branch cleanup --dry-run   # Preview
 mm branch cleanup             # Delete remote branches
 mm branch cleanup --local     # Delete local and remote
+```
+
+### `mm version`
+
+Print version information.
+
+```bash
+mm version
+```
+
+### `mm completion`
+
+Generate shell completions.
+
+```bash
+mm completion bash
+mm completion zsh
+mm completion fish
+mm completion powershell
 ```
 
 ---
@@ -579,10 +769,7 @@ mm hook Stop
 ### Debug Commands
 
 ```bash
-mm ping                    # Check daemon connectivity
-mm stats                   # Usage statistics
-mm commit list             # List recent commits
-mm claim list              # Same as `mm claims`
+mm ping    # Check daemon connectivity
 ```
 
 ---
@@ -608,9 +795,10 @@ mm claim list              # Same as `mm claims`
 
 Murmur uses simple, script-friendly output:
 
-- **Lists**: Tab-separated rows
-- **Actions**: `ok` on success
+- **Lists**: Tab-separated rows with headers
+- **Actions**: Descriptive messages (e.g., "Removed project.")
 - **IDs**: Single line (e.g., `issue create` prints the new issue ID)
+- **Empty states**: Helpful hints suggesting next actions
 - **Errors**: Actionable error messages to stderr
 
 ---
@@ -624,7 +812,7 @@ Murmur uses simple, script-friendly output:
 mm server start
 
 # Add a project
-mm project add https://github.com/myorg/myapp.git --name myapp
+mm project add https://github.com/myorg/myapp.git -n myapp
 
 # Configure GitHub backend
 export GITHUB_TOKEN=ghp_...
@@ -644,10 +832,10 @@ mm tui
 export MURMUR_DIR=/tmp/murmur-dev
 
 # Start daemon in foreground
-mm server start --foreground
+mm server start -f
 
 # In another terminal
-mm project add /path/to/local/repo --name test
+mm project add /path/to/local/repo -n test
 mm issue create "Test issue" -p test
 mm project start test
 mm attach test
@@ -660,9 +848,9 @@ mm attach test
 # Wait for ready issues and print count
 
 project="myapp"
-count=$(mm issue ready -p "$project" | wc -l)
+count=$(mm issue ready -p "$project" | tail -n +2 | wc -l)
 echo "Ready issues: $count"
 
-# List agent IDs
-mm agent list --project "$project" | cut -f1
+# List agent IDs (skip header)
+mm agent list -p "$project" | tail -n +2 | cut -f1
 ```

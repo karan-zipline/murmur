@@ -31,7 +31,11 @@ Under the base directory:
 
 ```
 <MURMUR_DIR or ~/.murmur>/
+  murmur.sock
   murmur.log
+  hosts/
+    agent-abc123.sock
+    agent-def456.sock
   plans/
     plan-1.md
   runtime/
@@ -91,3 +95,11 @@ Notes:
 
 - Structured logs written to the base directory.
 - Useful for debugging daemon startup, IPC, agent spawn, merge failures.
+
+### Host sockets (`hosts/`)
+
+- Unix domain sockets for agent host processes.
+- Each running agent has a socket named `<agent-id>.sock`.
+- Sockets are created by `murmur-host` processes.
+- **On daemon restart**, the daemon scans this directory to reconnect to running hosts.
+- Stale sockets (from dead processes) are cleaned up during discovery.

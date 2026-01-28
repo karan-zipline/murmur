@@ -34,6 +34,7 @@ Detailed documentation for each major subsystem:
 
 | Component | What it covers |
 |-----------|----------------|
+| [Agent Host](components/AGENT_HOST.md) | Host process architecture, daemon survival, host protocol |
 | [Agents](components/AGENTS.md) | Agent lifecycle, coding/planner/manager roles, backends, chat history |
 | [Orchestration](components/ORCHESTRATION.md) | The per-project spawn loop, claim registry, ready issue selection |
 | [Issue Backends](components/ISSUE_BACKENDS.md) | `tk` (local files), GitHub Issues, Linear integration |

@@ -87,7 +87,7 @@ Murmur follows **Functional Core, Imperative Shell** architecture.
 │  │  ┌──────────────────────────────────────────────────────────────┐  │  │
 │  │  │                       Shared State                           │  │  │
 │  │  │  • Project registry    • Claim registry                      │  │  │
-│  │  │  • Agent runtimes      • Pending permissions                 │  │  │
+│  │  │  • Host manager        • Pending permissions                 │  │  │
 │  │  │  • Orchestrators       • Commit logs                         │  │  │
 │  │  └──────────────────────────────────────────────────────────────┘  │  │
 │  │                                                                    │  │
@@ -96,19 +96,25 @@ Murmur follows **Functional Core, Imperative Shell** architecture.
 │  │  │  (proj-a)   │  │  (proj-b)   │  │       (optional)         │   │  │
 │  │  └──────┬──────┘  └──────┬──────┘  └──────────────────────────┘   │  │
 │  │         │                │                                         │  │
-│  │         ▼                ▼                                         │  │
-│  │  ┌──────────────────────────────────────────────────────────────┐  │  │
-│  │  │                     AGENT PROCESSES                          │  │  │
-│  │  │                                                              │  │  │
-│  │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │  │  │
-│  │  │  │ Agent    │  │ Agent    │  │ Planner  │  │ Manager  │     │  │  │
-│  │  │  │ (a-1)    │  │ (a-2)    │  │ (plan-1) │  │          │     │  │  │
-│  │  │  │ wt-a-1/  │  │ wt-a-2/  │  │wt-plan-1/│  │wt-manager│     │  │  │
-│  │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘     │  │  │
-│  │  │                                                              │  │  │
-│  │  └──────────────────────────────────────────────────────────────┘  │  │
-│  │                                                                    │  │
-│  └────────────────────────────────────────────────────────────────────┘  │
+│  └─────────┼────────────────┼─────────────────────────────────────────┘  │
+│            │                │                                            │
+│            │    Unix Socket (Host Protocol)                              │
+│            ▼                ▼                                            │
+│  ┌──────────────────────────────────────────────────────────────────────┐│
+│  │                      AGENT HOST PROCESSES                            ││
+│  │                        (murmur-host)                                 ││
+│  │                                                                      ││
+│  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐         ││
+│  │  │  Host (a-1)    │  │  Host (a-2)    │  │ Host (plan-1)  │         ││
+│  │  │  ┌──────────┐  │  │  ┌──────────┐  │  │  ┌──────────┐  │         ││
+│  │  │  │ Agent    │  │  │  │ Agent    │  │  │  │ Planner  │  │         ││
+│  │  │  │ (claude) │  │  │  │ (claude) │  │  │  │ (claude) │  │         ││
+│  │  │  │ wt-a-1/  │  │  │  │ wt-a-2/  │  │  │  │wt-plan-1/│  │         ││
+│  │  │  └──────────┘  │  │  └──────────┘  │  │  └──────────┘  │         ││
+│  │  │  a-1.sock      │  │  a-2.sock      │  │  plan-1.sock   │         ││
+│  │  └────────────────┘  └────────────────┘  └────────────────┘         ││
+│  │                                                                      ││
+│  └──────────────────────────────────────────────────────────────────────┘│
 │                                   │                                      │
 │                        Unix Socket (IPC)                                 │
 │                                   │                                      │
@@ -127,6 +133,7 @@ Murmur follows **Functional Core, Imperative Shell** architecture.
 | **CLI** | User commands via IPC; also invoked by agent hooks |
 | **TUI** | Real-time monitoring UI via attach event stream |
 | **Orchestrator** | Per-project loop: poll issues, spawn agents, track claims |
+| **Agent Host** | Wrapper process for agent subprocess; survives daemon restarts |
 | **Agent** | Claude Code or Codex subprocess in isolated worktree |
 | **Webhook Server** | Optional HTTP server for GitHub/Linear webhook triggers |
 
@@ -236,7 +243,9 @@ crates/
 │       └── stream/          # Agent output parsing
 │
 ├── murmur-protocol/   # IPC message types
-│   └── src/lib.rs          # Request/Response/Event DTOs
+│   └── src/
+│       ├── lib.rs          # Request/Response/Event DTOs
+│       └── host.rs         # Host protocol types
 │
 └── murmur/            # Imperative shell (daemon + CLI)
     └── src/
@@ -250,7 +259,14 @@ crates/
         │   ├── merge.rs
         │   ├── claude.rs    # Claude subprocess
         │   ├── webhook.rs
+        │   ├── host_manager.rs  # Agent host management
         │   └── rpc/         # Message handlers
+        ├── host/            # Agent host process
+        │   ├── mod.rs       # Module exports
+        │   ├── manager.rs   # Agent process management
+        │   └── server.rs    # Unix socket server
+        ├── bin/
+        │   └── murmur_host.rs   # Host binary entrypoint
         ├── git.rs           # Git operations
         ├── worktrees.rs     # Worktree management
         ├── github.rs        # GitHub API
@@ -494,6 +510,7 @@ Agent calls: mm agent done
 
 ### Component Deep Dives
 
+- [Agent Host](components/AGENT_HOST.md) — Host process protocol, daemon survival
 - [Agents](components/AGENTS.md) — State machine, backends, chat history
 - [Orchestration](components/ORCHESTRATION.md) — Spawn policy, claims
 - [Issue Backends](components/ISSUE_BACKENDS.md) — tk, GitHub, Linear
@@ -513,4 +530,7 @@ Agent calls: mm agent done
 | Socket server | `murmur/src/daemon/server.rs` |
 | Shared state | `murmur/src/daemon/state.rs` |
 | Merge pipeline | `murmur/src/daemon/merge.rs` |
+| Host manager | `murmur/src/daemon/host_manager.rs` |
+| Host process | `murmur/src/host/` |
+| Host protocol | `murmur-protocol/src/host.rs` |
 | Git operations | `murmur/src/git.rs` |

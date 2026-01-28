@@ -1,13 +1,15 @@
-# Planner and Manager Agents
+# Planner, Manager, and Director Agents
 
-Murmur has two “non-coding” agent modes:
+Murmur has three "non-coding" agent modes:
 - planners (produce plan artifacts under `plans/`)
 - a per-project manager agent (interactive coordinator)
+- a global director agent (cross-project coordinator)
 
 Code pointers:
 - Planner RPC: `crates/murmur/src/daemon/rpc/plan.rs`
 - Plan storage commands: `crates/murmur/src/main.rs` (`plan list/read/write`)
 - Manager RPC: `crates/murmur/src/daemon/rpc/manager.rs`
+- Director RPC: `crates/murmur/src/daemon/rpc/director.rs`
 
 ---
 
@@ -87,3 +89,82 @@ allowed_patterns = ["mm:*", "git :*"]
 ```
 
 See `docs/components/PERMISSIONS_AND_QUESTIONS.md`.
+
+---
+
+## Director Agent
+
+### Purpose
+
+The director agent is a **global singleton** (not per-project) intended for:
+- coordinating work across multiple projects
+- monitoring all orchestrators and agents
+- making high-level decisions about resource allocation
+- providing CTO-level oversight of the system
+
+Unlike managers which are project-scoped, there is only one director for the entire Murmur instance.
+
+### Identity and Working Directory
+
+Director agent id is always:
+
+`director`
+
+It runs in a dedicated working directory:
+
+`~/.murmur/director/` (or `$MURMUR_DIR/director/`)
+
+### Startup Behavior
+
+On start, the director receives a system prompt with:
+- list of all registered projects
+- each project's status (running/stopped), backend, and max agents
+- instructions for cross-project coordination
+
+The director remains idle until you send it a message.
+
+### Backend Support
+
+The director supports both Claude and Codex backends:
+
+```bash
+mm director start                    # Uses Claude (default)
+mm director start --backend codex    # Uses Codex
+```
+
+### Restrictions
+
+Director agents use a conservative tool allow-list:
+- loaded from `~/.murmur/config/director.toml` under `[director].allowed_patterns`
+- default: empty (no bash commands allowed)
+
+To enable bash commands, create `~/.murmur/config/director.toml`:
+
+```toml
+[director]
+allowed_patterns = ["mm:*"]
+```
+
+Pattern format follows the same rules as manager patterns:
+- `mm:*` — allows any `mm` command
+- `git:*` — allows any `git` command
+- `:*` — allows all commands (not recommended)
+
+### CLI Commands
+
+```bash
+mm director start [--backend claude|codex]  # Start the director
+mm director stop                             # Stop the director
+mm director status                           # Check if director is running
+mm director clear                            # Clear chat history
+```
+
+### Differences from Manager
+
+| Aspect | Manager | Director |
+|--------|---------|----------|
+| Scope | Per-project | Global singleton |
+| ID | `manager-<project>` | `director` |
+| Working dir | Project worktree | `~/.murmur/director/` |
+| System prompt | Project-aware | All-projects-aware |
+| Config file | `permissions.toml` | `director.toml` |

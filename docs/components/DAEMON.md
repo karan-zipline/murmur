@@ -7,6 +7,7 @@ Code pointers:
 - Socket server: `crates/murmur/src/daemon/server.rs`
 - Shared state model: `crates/murmur/src/daemon/state.rs`
 - RPC handlers: `crates/murmur/src/daemon/rpc/`
+- Host manager: `crates/murmur/src/daemon/host_manager.rs`
 - Webhooks: `crates/murmur/src/daemon/webhook.rs`
 - Comment poller: `crates/murmur/src/daemon/comment_poller.rs`
 
@@ -14,6 +15,7 @@ See also:
 - `docs/components/IPC.md`
 - `docs/components/ORCHESTRATION.md`
 - `docs/components/AGENTS.md`
+- `docs/components/AGENT_HOST.md`
 
 ---
 
@@ -23,7 +25,8 @@ The daemon is the control plane. It owns:
 
 - Loaded configuration (`config.toml`) and project registry.
 - Orchestrator lifecycle per project (start/stop, status).
-- Running agent processes (coding, planner, manager).
+- Host manager (connections to agent host processes).
+- Running agent processes (coding, planner, manager) via hosts.
 - Claim registry (which agent is assigned to which issue).
 - Pending permission requests and user questions.
 - Event broadcast stream used by attached clients (`attach`).
@@ -42,16 +45,20 @@ The daemon does *not* implement business rules as side-effecting code:
 2. Load config: `crates/murmur/src/config_store.rs`.
 3. Initialize `SharedState`:
    - `config`, `agents`, `claims`, `orchestrators`, `pending_permissions`, `pending_questions`, etc.
-4. **Rehydrate agents** from `runtime/agents.json`:
+4. **Discover agent hosts**: Scan `hosts/` directory for running host processes:
+   - Probe each `.sock` file with ping/status
+   - Reconnect to responsive hosts
+   - Clean up stale sockets from dead processes
+5. **Rehydrate agents** from `runtime/agents.json`:
    - Load persisted agent metadata from disk.
    - Skip agents whose worktrees no longer exist.
    - Check if agent processes are still running (via `/proc/<pid>`).
    - Restore agent runtime entries so that `mm agent claim` and `mm agent done` work for agents from previous daemon sessions.
    - Agents with dead processes are marked as `Exited`.
-5. Start the Unix socket server (`murmur.sock`). By default, the socket is placed under `~/.murmur/murmur.sock` (or `$MURMUR_DIR/murmur.sock` when `MURMUR_DIR` is set). When `MURMUR_SOCKET_PATH` is set, it overrides the socket path.
-6. Start webhook server if enabled.
-7. Start comment poller if enabled (polls claimed issues for new comments).
-8. Autostart orchestrators for projects with `autostart = true`.
+6. Start the Unix socket server (`murmur.sock`). By default, the socket is placed under `~/.murmur/murmur.sock` (or `$MURMUR_DIR/murmur.sock` when `MURMUR_DIR` is set). When `MURMUR_SOCKET_PATH` is set, it overrides the socket path.
+7. Start webhook server if enabled.
+8. Start comment poller if enabled (polls claimed issues for new comments).
+9. Autostart orchestrators for projects with `autostart = true`.
 
 ---
 

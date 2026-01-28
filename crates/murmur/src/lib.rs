@@ -5,6 +5,7 @@ pub mod dedup_store;
 pub mod git;
 pub mod github;
 pub mod hooks;
+pub mod host;
 pub mod ipc;
 pub mod issues;
 pub mod linear;

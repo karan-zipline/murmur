@@ -26,6 +26,7 @@ use crate::worktrees::WorktreeManager;
 
 mod claude;
 mod comment_poller;
+pub mod host_manager;
 mod issue_backend;
 mod merge;
 mod orchestration;
